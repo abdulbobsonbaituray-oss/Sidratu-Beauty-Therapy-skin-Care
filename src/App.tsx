@@ -35,7 +35,8 @@ import {
   LayoutDashboard,
   Download,
   Smartphone,
-  Cake
+  Cake,
+  Lock
 } from 'lucide-react';
 import {
   BarChart,
@@ -103,6 +104,7 @@ const PRIMARY_ADMIN_EMAIL = 'Sidratu82sesay@gmail.com';
 const SIDRATU_ADMIN_EMAIL = 'Sidratu82sesay@gmail.com';
 const SECONDARY_ADMIN_EMAIL = 'abdulbobsonbaituray@gmail.com';
 const SIDRATU_ADMIN_PHONES = ['+232 77 533830', '+23277533830', '033545691', '076553254'];
+const ADMIN_ACCESS_PASSWORD = '@sidratu82';
 
 const REQUIRED_OWNER_IDENTIFIERS = [
   PRIMARY_ADMIN_EMAIL,
@@ -411,6 +413,8 @@ export default function App() {
   const [loginName, setLoginName] = useState('');
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginAddress, setLoginAddress] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showAdminPasswordField, setShowAdminPasswordField] = useState(false);
 
   // Customer Appointment Form State
   const todayStr = new Date().toISOString().split('T')[0];
@@ -597,9 +601,6 @@ export default function App() {
     }
     return 'android';
   });
-  const [phonePreviewMode, setPhonePreviewMode] = useState<
-    'iphone' | 'android' | 'homescreen' | 'desktop'
-  >('iphone');
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -768,20 +769,59 @@ export default function App() {
     return 'Customer';
   };
 
-  const executeLogin = (nameInput: string, identifierInput: string, addressInput: string) => {
+  const executeLogin = (
+    nameInput: string,
+    identifierInput: string,
+    addressInput: string,
+    passwordInput: string = ''
+  ) => {
     const name = nameInput.trim();
     const identifier = identifierInput.trim();
     const address = addressInput.trim() || 'Freetown, Sierra Leone';
+    const cleanPassword = passwordInput.trim();
 
-    if (!identifier) {
+    if (!identifier && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
       showNotification('Please enter your email address or phone number.');
       return;
     }
 
-    const role = detectRole(identifier);
-    const isEmail = identifier.includes('@');
+    const detectedStaffRole = detectRole(identifier);
+    const enteredCodeInIdentifier = identifier === ADMIN_ACCESS_PASSWORD;
+    const isAttemptingAdmin =
+      detectedStaffRole !== 'Customer' ||
+      enteredCodeInIdentifier ||
+      showAdminPasswordField ||
+      cleanPassword.length > 0;
 
-    const normalizedInput = normalizeIdentifier(identifier);
+    let role: Role = 'Customer';
+
+    if (isAttemptingAdmin) {
+      const isPasswordValid =
+        cleanPassword === ADMIN_ACCESS_PASSWORD ||
+        (enteredCodeInIdentifier && cleanPassword === ADMIN_ACCESS_PASSWORD) ||
+        (enteredCodeInIdentifier && !showAdminPasswordField);
+
+      // Strictly require password @sidratu82 whenever an admin email/phone is used or admin access is requested
+      if (detectedStaffRole !== 'Customer' && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
+        setShowAdminPasswordField(true);
+        showNotification('Admin access requires the valid Admin password.');
+        return;
+      }
+
+      if (!isPasswordValid && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
+        setShowAdminPasswordField(true);
+        showNotification('Invalid Admin password or access code. Admin access denied.');
+        return;
+      }
+
+      role = detectedStaffRole !== 'Customer' ? detectedStaffRole : 'Owner';
+    }
+
+    const effectiveIdentifier =
+      enteredCodeInIdentifier || !identifier ? PRIMARY_ADMIN_EMAIL : identifier;
+    const isEmail = effectiveIdentifier.includes('@');
+
+    const normalizedInput = normalizeIdentifier(effectiveIdentifier);
     let existingClient = clientsDB.find(
       c =>
         normalizeIdentifier(c.email || '') === normalizedInput ||
@@ -792,9 +832,15 @@ export default function App() {
     if (!existingClient) {
       existingClient = {
         id: 'client_' + Date.now(),
-        name: name || (isEmail ? identifier.split('@')[0] : 'Walk-in Client'),
-        phone: isEmail ? '+23277000001' : identifier,
-        email: isEmail ? identifier : PRIMARY_ADMIN_EMAIL,
+        name:
+          name ||
+          (role !== 'Customer'
+            ? 'Sidratu Admin'
+            : isEmail
+            ? effectiveIdentifier.split('@')[0]
+            : 'Walk-in Client'),
+        phone: isEmail ? '+23277000001' : effectiveIdentifier,
+        email: isEmail ? effectiveIdentifier : PRIMARY_ADMIN_EMAIL,
         address,
         allergies: 'None',
         dob: '',
@@ -816,6 +862,7 @@ export default function App() {
     };
 
     setCurrentUser(activeUser);
+    setLoginPassword('');
     setProfName(activeUser.name || '');
     setProfPhone(activeUser.phone || '');
     setProfEmail(activeUser.email || '');
@@ -848,33 +895,7 @@ export default function App() {
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    executeLogin(loginName, loginIdentifier, loginAddress);
-  };
-
-  const quickDemoLogin = (
-    type: 'owner' | 'sidratu_admin' | 'secretary' | 'security' | 'customer'
-  ) => {
-    if (type === 'owner' || type === 'sidratu_admin') {
-      setLoginName('Sidratu Sesay');
-      setLoginIdentifier(PRIMARY_ADMIN_EMAIL);
-      setLoginAddress('101 Jomo Kenyatta Road, Freetown');
-      executeLogin('Sidratu Sesay', PRIMARY_ADMIN_EMAIL, '101 Jomo Kenyatta Road, Freetown');
-    } else if (type === 'secretary') {
-      setLoginName('Clinic Secretary');
-      setLoginIdentifier('secretary@sidratubeauty.com');
-      setLoginAddress('101 Jomo Kenyatta Road, Freetown');
-      executeLogin('Clinic Secretary', 'secretary@sidratubeauty.com', '101 Jomo Kenyatta Road, Freetown');
-    } else if (type === 'security') {
-      setLoginName('Front Desk Security');
-      setLoginIdentifier('security@sidratubeauty.com');
-      setLoginAddress('101 Jomo Kenyatta Road, Freetown');
-      executeLogin('Front Desk Security', 'security@sidratubeauty.com', '101 Jomo Kenyatta Road, Freetown');
-    } else {
-      setLoginName('Mariatu Sesay');
-      setLoginIdentifier('+23276554433');
-      setLoginAddress('18 Wilkinson Road, Freetown');
-      executeLogin('Mariatu Sesay', '+23276554433', '18 Wilkinson Road, Freetown');
-    }
+    executeLogin(loginName, loginIdentifier, loginAddress, loginPassword);
   };
 
   const APPOINTMENT_TREATMENT_GROUPS = useMemo(
@@ -1550,6 +1571,9 @@ export default function App() {
   const logoutUser = () => {
     setProfileDrawerOpen(false);
     setCurrentUser(null);
+    setMainView('customer');
+    setLoginPassword('');
+    setShowAdminPasswordField(false);
   };
 
   const toggleGoalSelection = (goalTitle: string) => {
@@ -1741,144 +1765,8 @@ export default function App() {
     setTimeout(() => setCopiedEmail(false), 2500);
   };
 
-  const isPhoneSimulator =
-    phonePreviewMode === 'iphone' ||
-    phonePreviewMode === 'android' ||
-    phonePreviewMode === 'homescreen';
-
   return (
-    <div
-      className={`min-h-screen flex flex-col ${
-        isPhoneSimulator
-          ? 'bg-[#17091C] py-4 px-2 sm:px-4 items-center justify-start'
-          : 'pb-20 md:pb-10'
-      }`}
-    >
-      {/* =====================================================================
-          INTERACTIVE PHONE SIMULATOR SWITCHER BAR (iPhone / Android / Home Screen / Desktop)
-          ===================================================================== */}
-      <div className="w-full max-w-6xl mx-auto mb-3 z-40 no-print">
-        <div className="plum-header text-white rounded-2xl px-4 py-2.5 shadow-xl border-2 border-[#D4AF37] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Smartphone className="w-5 h-5 text-[#D4AF37] shrink-0" />
-            <div>
-              <span className="text-xs sm:text-sm font-bold text-[#F3E5AB]">
-                Interactive Mobile Phone Preview
-              </span>
-              <span className="hidden lg:inline text-xs text-gray-200 ml-2">
-                — See &amp; test how Sidratu Clinic looks and works on a phone
-              </span>
-            </div>
-          </div>
-
-          {/* Device Frame Switcher */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setPhonePreviewMode('iphone')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                phonePreviewMode === 'iphone'
-                  ? 'gold-btn shadow-sm'
-                  : 'bg-white/10 hover:bg-white/20 text-[#F3E5AB] border border-[#D4AF37]/40'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>iPhone 16 Pro</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhonePreviewMode('android')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                phonePreviewMode === 'android'
-                  ? 'gold-btn shadow-sm'
-                  : 'bg-white/10 hover:bg-white/20 text-[#F3E5AB] border border-[#D4AF37]/40'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Android Phone</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhonePreviewMode('homescreen')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                phonePreviewMode === 'homescreen'
-                  ? 'gold-btn shadow-sm'
-                  : 'bg-white/10 hover:bg-white/20 text-[#F3E5AB] border border-[#D4AF37]/40'
-              }`}
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Phone Home Screen Icon</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhonePreviewMode('desktop')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                phonePreviewMode === 'desktop'
-                  ? 'gold-btn shadow-sm'
-                  : 'bg-white/10 hover:bg-white/20 text-[#F3E5AB] border border-[#D4AF37]/40'
-              }`}
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>Full Desktop Screen</span>
-            </button>
-          </div>
-
-          {/* 1-Tap Screen Demo Switcher inside Phone */}
-          <div className="flex flex-wrap items-center gap-1.5 border-t sm:border-t-0 pt-2 sm:pt-0 border-white/15">
-            <span className="text-[11px] text-[#D4AF37] font-bold mr-1">Quick Test:</span>
-            <button
-              type="button"
-              onClick={() => {
-                if (phonePreviewMode === 'homescreen') setPhonePreviewMode('iphone');
-                executeLogin('Aminata Kamara', '+232 76 445566', '24 Wilkinson Road, Freetown');
-                setMainView('customer');
-                setCustomerSection('dashboard');
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                currentUser && mainView === 'customer'
-                  ? 'bg-[#D4AF37] text-[#3B0944]'
-                  : 'bg-white/15 hover:bg-white/25 text-white'
-              }`}
-            >
-              Customer App
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (phonePreviewMode === 'homescreen') setPhonePreviewMode('iphone');
-                executeLogin(
-                  'Sidratu Sesay',
-                  PRIMARY_ADMIN_EMAIL,
-                  '101 Jomo Kenyatta Road, Freetown'
-                );
-                setMainView('admin');
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                currentUser && mainView === 'admin'
-                  ? 'bg-[#D4AF37] text-[#3B0944]'
-                  : 'bg-white/15 hover:bg-white/25 text-white'
-              }`}
-            >
-              Admin &amp; Age Sheet
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (phonePreviewMode === 'homescreen') setPhonePreviewMode('iphone');
-                setCurrentUser(null);
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                !currentUser && phonePreviewMode !== 'homescreen'
-                  ? 'bg-[#D4AF37] text-[#3B0944]'
-                  : 'bg-white/15 hover:bg-white/25 text-white'
-              }`}
-            >
-              Login Screen
-            </button>
-          </div>
-        </div>
-      </div>
-
+    <div className="min-h-screen flex flex-col pb-20 md:pb-10">
       {/* =====================================================================
           NOTIFICATION TOAST BANNER
           ===================================================================== */}
@@ -1903,201 +1791,11 @@ export default function App() {
       )}
 
       {/* =====================================================================
-          PHONE HARDWARE FRAME WRAPPER (When iPhone / Android / Home Screen is Active)
+          TOP NAVIGATION BAR (Visible after Login)
           ===================================================================== */}
-      <div
-        className={
-          isPhoneSimulator
-            ? `relative flex flex-col overflow-hidden shadow-[0_25px_70px_rgba(0,0,0,0.75)] transition-all duration-300 ${
-                phonePreviewMode === 'android'
-                  ? 'w-full max-w-[412px] h-[840px] rounded-[38px] border-[10px] border-[#23232A] ring-2 ring-[#D4AF37]/60 bg-[#FAF7F2]'
-                  : 'w-full max-w-[392px] h-[835px] rounded-[52px] border-[12px] border-[#18131D] ring-2 ring-[#D4AF37]/80 bg-[#FAF7F2]'
-              }`
-            : 'flex-1 flex flex-col w-full'
-        }
-      >
-        {/* Top Phone Status Bar & Camera Cutout (Only in Phone Simulator Mode) */}
-        {isPhoneSimulator && (
-          <div className="bg-[#3B0944] text-white px-6 pt-2 pb-1.5 flex items-center justify-between text-[11px] font-bold select-none shrink-0 border-b border-[#D4AF37]/30 relative">
-            <span className="font-mono-tabular">9:41</span>
-            {phonePreviewMode === 'android' ? (
-              /* Android Center Punch-Hole Camera */
-              <div className="w-3.5 h-3.5 rounded-full bg-black border border-gray-700 flex items-center justify-center">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-950" />
-              </div>
-            ) : (
-              /* iPhone 16 Pro Dynamic Island */
-              <div className="w-24 h-5 rounded-full bg-black flex items-center justify-between px-2.5 shadow-inner">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <div className="w-2.5 h-2.5 rounded-full bg-[#1a1a2e] border border-gray-700" />
-              </div>
-            )}
-            <div className="flex items-center gap-1.5 text-[10px] font-mono-tabular">
-              <span>5G</span>
-              <span className="px-1 py-0.2 rounded bg-[#D4AF37] text-[#3B0944] font-extrabold text-[9px]">
-                100%
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* IF USER SELECTED "PHONE HOME SCREEN ICON" PREVIEW */}
-        {phonePreviewMode === 'homescreen' ? (
-          <div className="flex-1 flex flex-col justify-between p-5 bg-gradient-to-b from-[#2A0632] via-[#3B0944] to-[#16031B] text-white select-none overflow-y-auto">
-            <div className="space-y-5">
-              {/* Mobile Lock/Home Widget for Sidratu Clinic */}
-              <div className="p-4 rounded-3xl bg-white/10 backdrop-blur-md border border-[#D4AF37]/60 shadow-lg space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold text-[#D4AF37]">
-                    Sidratu Clinic Widget · Freetown
-                  </span>
-                  <span className="text-[10px] text-emerald-300 font-bold">
-                    Open 9:00 AM – 7:30 PM
-                  </span>
-                </div>
-                <p className="font-display font-bold text-lg text-[#F3E5AB] leading-tight">
-                  Sidratu Beauty Therapy Skin Care
-                </p>
-                <p className="text-xs text-gray-200">
-                  101 Jomo Kenyatta Road, Freetown · Aesthetics &amp; Dental
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setPhonePreviewMode('iphone')}
-                  className="w-full mt-1 py-2 rounded-xl gold-btn text-xs font-bold flex items-center justify-center gap-1.5 shadow"
-                >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>Tap to Launch Full-Screen Web App</span>
-                </button>
-              </div>
-
-              {/* Phone Home Screen App Icon Grid */}
-              <div>
-                <p className="text-[11px] text-center text-[#F3E5AB]/80 mb-3 font-medium">
-                  Tap the <strong>Sidratu Clinic</strong> icon below on your phone Home Screen:
-                </p>
-                <div className="grid grid-cols-4 gap-4 justify-items-center pt-1">
-                  {/* Installed Sidratu Clinic PWA Icon */}
-                  <button
-                    type="button"
-                    onClick={() => setPhonePreviewMode('iphone')}
-                    className="group flex flex-col items-center gap-1.5 focus:outline-none"
-                  >
-                    <div className="w-15 h-15 rounded-2xl overflow-hidden border-2 border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.6)] group-hover:scale-105 transition relative">
-                      <img
-                        src="/assets/aistudio/Gemini_Generated_Image_uuwh6auuwh6auuwh_8bbd66ae.jpg"
-                        alt="Sidratu Clinic App Icon"
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border border-white text-[9px] font-bold flex items-center justify-center">
-                        1
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-bold text-[#F3E5AB] text-center leading-tight">
-                      Sidratu Clinic
-                    </span>
-                  </button>
-
-                  {/* Companion Quick Launch Shortcut: Book Session */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      executeLogin('Aminata Kamara', '+232 76 445566', '24 Wilkinson Road, Freetown');
-                      setMainView('customer');
-                      setCustomerSection('new-appointment');
-                      setPhonePreviewMode('iphone');
-                    }}
-                    className="group flex flex-col items-center gap-1.5"
-                  >
-                    <div className="w-15 h-15 rounded-2xl bg-[#52125E] border border-[#D4AF37]/60 flex items-center justify-center shadow-md group-hover:scale-105 transition">
-                      <CalendarPlus className="w-7 h-7 text-[#D4AF37]" />
-                    </div>
-                    <span className="text-[11px] text-gray-200 text-center leading-tight">
-                      Book Visit
-                    </span>
-                  </button>
-
-                  {/* Companion Quick Launch Shortcut: Admin Record Sheet */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      executeLogin(
-                        'Sidratu Sesay',
-                        PRIMARY_ADMIN_EMAIL,
-                        '101 Jomo Kenyatta Road, Freetown'
-                      );
-                      setMainView('admin');
-                      setPhonePreviewMode('iphone');
-                    }}
-                    className="group flex flex-col items-center gap-1.5"
-                  >
-                    <div className="w-15 h-15 rounded-2xl bg-[#3B0944] border border-[#D4AF37]/60 flex items-center justify-center shadow-md group-hover:scale-105 transition">
-                      <ShieldCheck className="w-7 h-7 text-[#D4AF37]" />
-                    </div>
-                    <span className="text-[11px] text-gray-200 text-center leading-tight">
-                      Admin Sheet
-                    </span>
-                  </button>
-
-                  {/* Companion Quick Launch Shortcut: AI Skincare */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      executeLogin('Aminata Kamara', '+232 76 445566', '24 Wilkinson Road, Freetown');
-                      setMainView('customer');
-                      setCustomerSection('ai-community');
-                      setPhonePreviewMode('iphone');
-                    }}
-                    className="group flex flex-col items-center gap-1.5"
-                  >
-                    <div className="w-15 h-15 rounded-2xl bg-[#52125E] border border-[#D4AF37]/60 flex items-center justify-center shadow-md group-hover:scale-105 transition">
-                      <Sparkles className="w-7 h-7 text-[#D4AF37]" />
-                    </div>
-                    <span className="text-[11px] text-gray-200 text-center leading-tight">
-                      AI Skincare
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Phone Dock */}
-            <div className="p-3 rounded-3xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-around">
-              <button
-                type="button"
-                onClick={() => setPhonePreviewMode('iphone')}
-                className="px-4 py-2 rounded-2xl gold-btn text-xs font-bold flex items-center gap-1.5 shadow"
-              >
-                <Smartphone className="w-4 h-4" />
-                <span>Open Sidratu App on Phone</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleInstallWebAppClick()}
-                className="px-3 py-2 rounded-2xl bg-white/15 hover:bg-white/25 text-xs font-bold text-[#F3E5AB]"
-              >
-                Install Steps
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div
-            className={
-              isPhoneSimulator
-                ? 'phone-simulator-viewport phone-simulator-scroll flex-1 overflow-y-auto overflow-x-hidden flex flex-col relative'
-                : 'flex-1 flex flex-col'
-            }
-          >
-            {/* =====================================================================
-                TOP NAVIGATION BAR (Visible after Login)
-                ===================================================================== */}
-            {currentUser && (
-              <header className="plum-header text-white sticky top-0 z-30 shadow-md">
-                <div
-                  className={`max-w-6xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between ${
-                    isPhoneSimulator ? 'gap-2' : 'gap-8'
-                  }`}
-                >
+      {currentUser && (
+        <header className="plum-header text-white sticky top-0 z-30 shadow-md">
+          <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-8">
             {/* Zone 1: Brand Title */}
             <div className="flex items-center gap-3 shrink-0">
               <div
@@ -2110,12 +1808,8 @@ export default function App() {
                   className="w-full h-full object-cover"
                 />
               </div>
-              <span
-                className={`font-display font-bold tracking-wide text-[#F3E5AB] whitespace-nowrap shrink-0 ${
-                  isPhoneSimulator ? 'text-base' : 'text-xl md:text-2xl'
-                }`}
-              >
-                {isPhoneSimulator ? 'Sidratu Clinic' : 'Sidratu Beauty Therapy'}
+              <span className="font-display font-bold tracking-wide text-[#F3E5AB] whitespace-nowrap shrink-0 text-xl md:text-2xl">
+                Sidratu Beauty Therapy
               </span>
             </div>
 
@@ -2216,11 +1910,7 @@ export default function App() {
               >
                 <Smartphone className="w-3.5 h-3.5" />
                 <span>
-                  {isAppInstalled
-                    ? 'Installed'
-                    : isPhoneSimulator
-                    ? 'Install'
-                    : 'Install App (iPhone / Android)'}
+                  {isAppInstalled ? 'Installed' : 'Install App (iPhone / Android)'}
                 </span>
               </button>
 
@@ -2293,7 +1983,7 @@ export default function App() {
                   <input
                     type="text"
                     id="login-name"
-                    required
+                    required={!showAdminPasswordField}
                     value={loginName}
                     onChange={e => setLoginName(e.target.value)}
                     placeholder="e.g., Aminata Kamara"
@@ -2308,9 +1998,15 @@ export default function App() {
                   <input
                     type="text"
                     id="login-identifier"
-                    required
+                    required={!showAdminPasswordField}
                     value={loginIdentifier}
-                    onChange={e => setLoginIdentifier(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setLoginIdentifier(val);
+                      if (detectRole(val) !== 'Customer') {
+                        setShowAdminPasswordField(true);
+                      }
+                    }}
                     placeholder="e.g., +232 77 123456 or email@domain.com"
                     className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-[#D4AF37] outline-none text-sm"
                   />
@@ -2328,6 +2024,56 @@ export default function App() {
                     placeholder="e.g., 24 Wilkinson Road, Freetown"
                     className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-[#D4AF37] outline-none"
                   />
+                </div>
+
+                {/* Protected Admin Access Code / Password Section */}
+                <div className="pt-1">
+                  {!showAdminPasswordField && detectRole(loginIdentifier) === 'Customer' ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminPasswordField(true)}
+                      className="text-xs font-semibold text-[#3B0944] dark:text-[#F3E5AB] underline underline-offset-2 flex items-center gap-1.5 opacity-80 hover:opacity-100"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <span>Staff / Admin Sign In (Requires Access Code or Password)</span>
+                    </button>
+                  ) : (
+                    <div className="p-3.5 rounded-xl border border-[#D4AF37] bg-amber-50/40 dark:bg-white/5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label
+                          className="block text-xs font-bold text-[#3B0944] dark:text-[#F3E5AB] flex items-center gap-1.5"
+                          htmlFor="login-admin-password"
+                        >
+                          <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                          <span>Admin Access Code / Password</span>
+                        </label>
+                        {detectRole(loginIdentifier) === 'Customer' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAdminPasswordField(false);
+                              setLoginPassword('');
+                            }}
+                            className="text-[11px] opacity-70 hover:opacity-100 underline"
+                          >
+                            Cancel Admin Login
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="password"
+                        id="login-admin-password"
+                        value={loginPassword}
+                        onChange={e => setLoginPassword(e.target.value)}
+                        placeholder="Enter Admin password / code"
+                        autoComplete="current-password"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-[#D4AF37] outline-none text-sm"
+                      />
+                      <p className="text-[11px] opacity-75">
+                        Admin access is strictly protected. Enter your authorized Admin email and password to continue.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -3477,9 +3223,9 @@ export default function App() {
           )}
 
           {/* ===================================================================
-              ADMIN PORTAL VIEW (Owner, Secretary & Security)
+              ADMIN PORTAL VIEW (Owner, Secretary & Security — Strictly Protected)
               =================================================================== */}
-          {mainView === 'admin' && (
+          {mainView === 'admin' && currentUser.role !== 'Customer' && (
             <div className="space-y-6">
               {/* CLINIC GROWTH: MONTHLY TREATMENT CHART */}
               <div className="theming-card p-5 rounded-2xl border border-[#D4AF37] space-y-4">
@@ -4847,14 +4593,12 @@ export default function App() {
       )}
 
       {/* =====================================================================
-          NATIVE MOBILE BOTTOM TAB NAVIGATION BAR (Visible on Mobile & Phone Simulator)
+          NATIVE MOBILE BOTTOM TAB NAVIGATION BAR (Visible on Mobile Devices)
           ===================================================================== */}
       {currentUser && (
         <nav
           aria-label="Mobile bottom navigation"
-          className={`${
-            isPhoneSimulator ? 'sticky bottom-0 flex' : 'md:hidden fixed bottom-0 left-0 right-0 flex'
-          } z-30 bg-[#3B0944] text-white border-t-2 border-[#D4AF37] px-1.5 py-1.5 items-center justify-around shadow-2xl no-print shrink-0`}
+          className="md:hidden fixed bottom-0 left-0 right-0 flex z-30 bg-[#3B0944] text-white border-t-2 border-[#D4AF37] px-1.5 py-1.5 items-center justify-around shadow-2xl no-print shrink-0"
         >
           <button
             type="button"
@@ -4952,38 +4696,6 @@ export default function App() {
           )}
         </nav>
       )}
-          </div>
-        )}
-
-        {/* Bottom Phone Hardware Home Indicator / Android Navigation Bar */}
-        {isPhoneSimulator && (
-          <div className="bg-[#230529] text-white py-2 px-6 flex items-center justify-center select-none shrink-0 border-t border-[#D4AF37]/30">
-            {phonePreviewMode === 'android' ? (
-              <div className="flex items-center justify-around w-48 opacity-75 text-xs">
-                <span>◁</span>
-                <button
-                  type="button"
-                  onClick={() => setPhonePreviewMode('homescreen')}
-                  title="Tap Home Button to view Phone Home Screen Icon"
-                  className="hover:text-[#D4AF37]"
-                >
-                  ◯
-                </button>
-                <span>▢</span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  setPhonePreviewMode(phonePreviewMode === 'homescreen' ? 'iphone' : 'homescreen')
-                }
-                title="Tap iPhone Home Bar to toggle Phone Home Screen Icon view"
-                className="w-32 h-1.5 rounded-full bg-white/75 hover:bg-[#D4AF37] transition"
-              />
-            )}
-          </div>
-        )}
-      </div>
 
       {/* =====================================================================
           EMAIL RESPONSE DISPATCH MODAL (From Sidratu82sesay@gmail.com)
@@ -5614,22 +5326,24 @@ export default function App() {
                 </ol>
               </div>
 
-              <div className="p-4 rounded-xl border border-[#D4AF37] space-y-2">
-                <h4 className="font-bold text-base text-[#D4AF37]">
-                  For Admin ({PRIMARY_ADMIN_EMAIL}) & Clinic Staff
-                </h4>
-                <ol className="list-decimal pl-5 space-y-1.5">
-                  <li>
-                    <strong>See All Views:</strong> Use the top navigation bar or the Admin banner to switch seamlessly between the <strong>Admin Dashboard</strong> and the <strong>Customer Portal</strong> views.
-                  </li>
-                  <li>
-                    <strong>Respond to Appointments & History:</strong> Inside the Client Record Sheet, type a reply on any client's <em>New Appointment</em> or <em>Past History</em> entry and click <strong>Post Response</strong> or <strong>Respond via Email</strong> to send from <code>{PRIMARY_ADMIN_EMAIL}</code>.
-                  </li>
-                  <li>
-                    <strong>Secretary & Admin Ledger:</strong> Record manual payment details, specialist notes, and click <strong>Save to Client's Past History</strong> or <strong>Print / Save as PDF</strong>.
-                  </li>
-                </ol>
-              </div>
+              {currentUser && currentUser.role !== 'Customer' && (
+                <div className="p-4 rounded-xl border border-[#D4AF37] space-y-2">
+                  <h4 className="font-bold text-base text-[#D4AF37]">
+                    For Admin ({PRIMARY_ADMIN_EMAIL}) & Clinic Staff
+                  </h4>
+                  <ol className="list-decimal pl-5 space-y-1.5">
+                    <li>
+                      <strong>See All Views:</strong> Use the top navigation bar or the Admin banner to switch seamlessly between the <strong>Admin Dashboard</strong> and the <strong>Customer Portal</strong> views.
+                    </li>
+                    <li>
+                      <strong>Respond to Appointments & History:</strong> Inside the Client Record Sheet, type a reply on any client's <em>New Appointment</em> or <em>Past History</em> entry and click <strong>Post Response</strong> or <strong>Respond via Email</strong> to send from <code>{PRIMARY_ADMIN_EMAIL}</code>.
+                    </li>
+                    <li>
+                      <strong>Secretary & Admin Ledger:</strong> Record manual payment details, specialist notes, and click <strong>Save to Client's Past History</strong> or <strong>Print / Save as PDF</strong>.
+                    </li>
+                  </ol>
+                </div>
+              )}
 
               <div className="text-right">
                 <button
