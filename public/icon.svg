@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="plumGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B0944" />
+      <stop offset="50%" stop-color="#52125E" />
+      <stop offset="100%" stop-color="#2A0531" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F3E5AB" />
+      <stop offset="50%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#A67C00" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#plumGrad)" />
+  <circle cx="256" cy="256" r="196" fill="none" stroke="url(#goldGrad)" stroke-width="10" opacity="0.85" />
+  <circle cx="256" cy="256" r="176" fill="none" stroke="url(#goldGrad)" stroke-width="3" stroke-dasharray="10 8" opacity="0.55" />
+  <!-- Sparkle Crown / Lotus Emblem -->
+  <path d="M256 108 L272 148 L312 164 L272 180 L256 220 L240 180 L200 164 L240 148 Z" fill="url(#goldGrad)" />
+  <!-- Monogram S -->
+  <text x="256" y="348" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="185" fill="url(#goldGrad)">S</text>
+  <text x="256" y="405" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="26" letter-spacing="8" fill="#F3E5AB">SIDRATU</text>
+</svg>

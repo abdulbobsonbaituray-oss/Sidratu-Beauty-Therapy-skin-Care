@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --plum-dark: #3B0944;
+  --plum-mid: #52125E;
+  --gold-primary: #D4AF37;
+  --gold-light: #F3E5AB;
+  --bg-main: #FAF7F2;
+  --bg-card: #FFFFFF;
+  --text-main: #1F1624;
+  --text-muted: #5C4D63;
+  --border-soft: #E6DEC8;
+}
+
+body.dark-plum-theme {
+  --bg-main: #1E0524;
+  --bg-card: #2D0936;
+  --text-main: #FAF7F2;
+  --text-muted: #D8C2E0;
+  --border-soft: #5C2469;
+}
+
+body.large-text-mode {
+  font-size: 118%;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.font-display {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+}
+
+.font-mono-tabular {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.theming-card {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-soft);
+}
+
+.plum-header {
+  background: linear-gradient(135deg, #3B0944 0%, #52125E 100%);
+  border-bottom: 2px solid #D4AF37;
+}
+
+.gold-btn {
+  background: linear-gradient(135deg, #D4AF37 0%, #B89020 100%);
+  color: #1F1624;
+  font-weight: 700;
+}
+
+.gold-btn:hover {
+  filter: brightness(1.06);
+}
+
+.plum-btn {
+  background-color: #3B0944;
+  color: #FAF7F2;
+  border: 1px solid #D4AF37;
+}
+
+/* Printable Client Record Paper Styling */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-record-paper,
+  #printable-record-paper * {
+    visibility: visible;
+  }
+  #printable-record-paper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none !important;
+    border: 2px solid #000 !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Phone Simulator Viewport Overrides (Forces true mobile single-column layout inside desktop phone frame) */
+.phone-simulator-viewport [class*="md:grid-cols-"],
+.phone-simulator-viewport [class*="lg:grid-cols-"],
+.phone-simulator-viewport [class*="sm:grid-cols-"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.phone-simulator-viewport [class*="lg:col-span-"],
+.phone-simulator-viewport [class*="md:col-span-"],
+.phone-simulator-viewport [class*="sm:col-span-"] {
+  grid-column: span 1 / span 1 !important;
+}
+
+.phone-simulator-viewport .hidden.md\:flex {
+  display: none !important;
+}
+
+.phone-simulator-viewport .md\:hidden {
+  display: flex !important;
+}
+
+.phone-simulator-viewport .hidden.sm\:inline {
+  display: none !important;
+}
+
+.phone-simulator-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 175, 55, 0.5) transparent;
+}
+

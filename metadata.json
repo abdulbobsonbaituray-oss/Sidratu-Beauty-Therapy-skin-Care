@@ -1,0 +1,8 @@
+{
+  "name": "Sidratu Beauty Therapy Skin Care",
+  "description": "Sidratu Beauty Therapy — Skin care, aesthetics & dental clinic at 101 Jomo Kenyatta Road, Freetown. Book appointments, view past history, and manage client record sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
