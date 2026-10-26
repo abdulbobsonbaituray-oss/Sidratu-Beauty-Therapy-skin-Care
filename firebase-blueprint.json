@@ -1,0 +1,369 @@
+{
+  "entities": {
+    "ClientProfile": {
+      "title": "ClientProfile",
+      "description": "Stores client personal, clinical, and role profile records for Sidratu Beauty Therapy Skin Care.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the client or creator."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Full name of the client."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "Client phone number."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Client email address."
+        },
+        "address": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 250,
+          "description": "Client residential address in Freetown or Sierra Leone."
+        },
+        "allergies": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Known allergies, skin sensitivities, or medical conditions."
+        },
+        "dob": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20,
+          "description": "Date of birth in YYYY-MM-DD format for clinical age calculation."
+        },
+        "quickNotes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Admin clinical quick notes for the client record sheet."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Customer", "Owner", "Secretary", "Security"],
+          "description": "Role-based access control level for the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the client profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the client profile was last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "name",
+        "phone",
+        "email",
+        "address",
+        "allergies",
+        "dob",
+        "quickNotes",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AppointmentRecord": {
+      "title": "AppointmentRecord",
+      "description": "Stores scheduled client skincare, aesthetics, and dental appointments.",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID of the parent ClientProfile document in /clients/{clientId}."
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the client who owns this appointment."
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display name of the client."
+        },
+        "treatment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Selected clinic treatment or procedure."
+        },
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Requested appointment date (YYYY-MM-DD)."
+        },
+        "time": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Requested appointment time (HH:mm)."
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000,
+          "description": "Client notes or special requests for the appointment."
+        },
+        "consentSignedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Digital consent signature of the client."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Confirmed", "Responded", "Completed"],
+          "description": "Current lifecycle status of the appointment."
+        },
+        "frequency": {
+          "type": "string",
+          "enum": ["None", "Weekly", "Monthly"],
+          "description": "Recurring appointment frequency."
+        },
+        "adminResponse": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Official response from clinic administration."
+        },
+        "adminRespondedBy": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Email or identifier of the administrator who responded."
+        },
+        "adminRespondedAt": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 60,
+          "description": "Formatted timestamp when the administrator responded."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the appointment was booked."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the appointment was last updated."
+        }
+      },
+      "required": [
+        "clientId",
+        "ownerUid",
+        "clientName",
+        "treatment",
+        "date",
+        "time",
+        "notes",
+        "consentSignedBy",
+        "status",
+        "frequency",
+        "adminResponse",
+        "adminRespondedBy",
+        "adminRespondedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TreatmentHistoryRecord": {
+      "title": "TreatmentHistoryRecord",
+      "description": "Stores completed clinical sessions, therapy logs, specialist notes, and admin responses.",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID of the parent ClientProfile document in /clients/{clientId}."
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the client who owns this treatment history log."
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display name of the client."
+        },
+        "dayDateTime": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Formatted day, date, and time of the clinical session."
+        },
+        "treatment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Treatment performed during the session."
+        },
+        "ratingOrPayment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "description": "Post-session feeling rating or secretary payment record."
+        },
+        "specialist": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Name or role of the specialist who performed the session."
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Client post-session feeling or clinical notes."
+        },
+        "specialistNotes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Internal clinical specialist observations."
+        },
+        "adminResponse": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000,
+          "description": "Official follow-up response from clinic administration."
+        },
+        "adminRespondedBy": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Email of the administrator who responded."
+        },
+        "adminRespondedAt": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 60,
+          "description": "Formatted timestamp when the administrator responded."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the treatment history record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the treatment history record was last updated."
+        }
+      },
+      "required": [
+        "clientId",
+        "ownerUid",
+        "clientName",
+        "dayDateTime",
+        "treatment",
+        "ratingOrPayment",
+        "specialist",
+        "notes",
+        "specialistNotes",
+        "adminResponse",
+        "adminRespondedBy",
+        "adminRespondedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminRoleRecord": {
+      "title": "AdminRoleRecord",
+      "description": "Trusted role registry mapping Firebase Auth UIDs to administrative roles (Owner, Secretary, Security).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150,
+          "description": "Verified email address of the administrator."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Owner", "Secretary", "Security"],
+          "description": "Assigned administrative role."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the admin role was registered."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the admin role was last updated."
+        }
+      },
+      "required": ["uid", "email", "role", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": {
+        "$ref": "#/entities/ClientProfile"
+      },
+      "description": "Client profile records containing personal and clinical information, isolated to the document owner or clinic administrators."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": {
+        "$ref": "#/entities/AppointmentRecord"
+      },
+      "description": "Client appointment bookings linked to a ClientProfile, accessible only to the owning client or clinic administrators."
+    },
+    "/treatmentHistory/{historyId}": {
+      "schema": {
+        "$ref": "#/entities/TreatmentHistoryRecord"
+      },
+      "description": "Client past treatment history logs and clinical responses linked to a ClientProfile, accessible only to the owning client or clinic administrators."
+    },
+    "/admins/{adminUid}": {
+      "schema": {
+        "$ref": "#/entities/AdminRoleRecord"
+      },
+      "description": "Trusted administrator role lookup collection for RBAC verification."
+    }
+  }
+}

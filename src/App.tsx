@@ -36,7 +36,10 @@ import {
   Download,
   Smartphone,
   Cake,
-  Lock
+  Lock,
+  TrendingUp,
+  Award,
+  PenTool
 } from 'lucide-react';
 import {
   BarChart,
@@ -48,6 +51,30 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import GeminiAssistantHub from './components/GeminiAssistantHub';
+import {
+  auth,
+  db,
+  googleProvider,
+  signInWithPopup,
+  firebaseSignOut,
+  onAuthStateChanged,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  OperationType,
+  handleFirestoreError,
+  isFirebaseBootstrappedAdmin,
+  syncClientProfileToFirestore,
+  saveAppointmentToFirestore,
+  respondToAppointmentInFirestore,
+  deleteAppointmentFromFirestore,
+  saveHistoryToFirestore,
+  respondToHistoryInFirestore,
+  deleteHistoryFromFirestore,
+  deleteClientFromFirestore,
+  User
+} from './firebase';
 
 interface Appointment {
   id: string;
@@ -126,6 +153,113 @@ const DEFAULT_ADMIN_CONFIG: AdminConfig = {
     '+23277000003'
   ]
 };
+
+interface AdminSignatureConfig {
+  signerName: string;
+  signerTitle: string;
+  signerEmail: string;
+  signatureStyle: 'script' | 'formal' | 'stamp';
+  verificationNote: string;
+  customAccessCode: string;
+}
+
+const DEFAULT_ADMIN_SIGNATURE: AdminSignatureConfig = {
+  signerName: 'Sidratu Sesay',
+  signerTitle: 'Founder & Lead Aesthetician',
+  signerEmail: PRIMARY_ADMIN_EMAIL,
+  signatureStyle: 'script',
+  verificationNote: 'Official Clinic Authorization · 101 Jomo Kenyatta Road, Freetown',
+  customAccessCode: ADMIN_ACCESS_PASSWORD
+};
+
+const ADMIN_SIGNATURE_PRESETS: Array<Omit<AdminSignatureConfig, 'customAccessCode'>> = [
+  {
+    signerName: 'Sidratu Sesay',
+    signerTitle: 'Founder & Lead Aesthetician',
+    signerEmail: PRIMARY_ADMIN_EMAIL,
+    signatureStyle: 'script',
+    verificationNote: 'Official Clinic Authorization · 101 Jomo Kenyatta Road, Freetown'
+  },
+  {
+    signerName: 'Abdul Bobson Baituray',
+    signerTitle: 'Managing Director & Clinic Admin',
+    signerEmail: SECONDARY_ADMIN_EMAIL,
+    signatureStyle: 'formal',
+    verificationNote: 'Executive Administration · Sidratu Beauty Therapy Skin Care'
+  },
+  {
+    signerName: 'Sidratu Clinic Secretary',
+    signerTitle: 'Front Desk & Clinical Records Officer',
+    signerEmail: PRIMARY_ADMIN_EMAIL,
+    signatureStyle: 'stamp',
+    verificationNote: 'Verified Front Desk Ledger · 101 Jomo Kenyatta Road, Freetown'
+  }
+];
+
+const CLINIC_SERVICE_TARIFFS_SLE: Record<string, { tariffSLE: number; category: string }> = {
+  'HydraFacial Luxury Glow': { tariffSLE: 1450, category: 'Facial & Skin Therapy' },
+  'Chemical Peel & Pigmentation Care': { tariffSLE: 1200, category: 'Facial & Skin Therapy' },
+  'Microneedling & Acne Scar Repair': { tariffSLE: 1650, category: 'Facial & Skin Therapy' },
+  'PRP (Platelet-Rich Plasma) Rejuvenation': { tariffSLE: 2400, category: 'Facial & Skin Therapy' },
+  'Skin Tag & Mole Removal': { tariffSLE: 950, category: 'Facial & Skin Therapy' },
+  'Laser Teeth Whitening': { tariffSLE: 1800, category: 'Dental & Smile Aesthetics' },
+  'Dental Braces Consultation & Fitting': { tariffSLE: 3500, category: 'Dental & Smile Aesthetics' },
+  'Teeth Filling & Dental Restoration': { tariffSLE: 1100, category: 'Dental & Smile Aesthetics' },
+  'Tooth Scaling & Polishing': { tariffSLE: 850, category: 'Dental & Smile Aesthetics' },
+  'Non-Surgical Nose Lift': { tariffSLE: 2800, category: 'Body & Specialty Aesthetics' },
+  'Full Body Detox Scrub & Polish': { tariffSLE: 1350, category: 'Body & Specialty Aesthetics' },
+  'IV Glutathione & Vitamin Glow Drip': { tariffSLE: 1900, category: 'Body & Specialty Aesthetics' }
+};
+
+function getServiceTariffAndCategory(treatmentName: string): { tariffSLE: number; category: string } {
+  const clean = (treatmentName || '').trim();
+  if (CLINIC_SERVICE_TARIFFS_SLE[clean]) {
+    return CLINIC_SERVICE_TARIFFS_SLE[clean];
+  }
+  const lower = clean.toLowerCase();
+  for (const [key, val] of Object.entries(CLINIC_SERVICE_TARIFFS_SLE)) {
+    if (lower.includes(key.toLowerCase()) || key.toLowerCase().includes(lower)) {
+      return val;
+    }
+  }
+  if (lower.includes('prp') || lower.includes('plasma')) {
+    return { tariffSLE: 2400, category: 'Facial & Skin Therapy' };
+  }
+  if (lower.includes('brace') || lower.includes('orthodont')) {
+    return { tariffSLE: 3500, category: 'Dental & Smile Aesthetics' };
+  }
+  if (lower.includes('whiten') || lower.includes('dental') || lower.includes('tooth') || lower.includes('teeth')) {
+    return { tariffSLE: 1250, category: 'Dental & Smile Aesthetics' };
+  }
+  if (lower.includes('glutathione') || lower.includes('iv ') || lower.includes('drip') || lower.includes('body')) {
+    return { tariffSLE: 1800, category: 'Body & Specialty Aesthetics' };
+  }
+  return { tariffSLE: 1300, category: 'Facial & Skin Therapy' };
+}
+
+function extractSessionRevenueSLE(treatmentName: string, ratingOrPayment?: string): number {
+  const raw = (ratingOrPayment || '').trim();
+  if (raw) {
+    const currencyMatch = raw.match(/(?:SLE|Le|NLe|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\.[0-9]+)?)/i);
+    if (currencyMatch && currencyMatch[1]) {
+      const parsed = parseFloat(currencyMatch[1].replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed > 0) {
+        return Math.round(parsed);
+      }
+    }
+    const withoutReceiptOrRating = raw
+      .replace(/#\s*[0-9]+/g, '')
+      .replace(/[0-9]\s*\/\s*[0-9]/g, '');
+    const standaloneMatch = withoutReceiptOrRating.match(/\b([1-9][0-9]{2,5})\b/);
+    if (standaloneMatch && standaloneMatch[1]) {
+      const parsed = parseInt(standaloneMatch[1], 10);
+      if (!isNaN(parsed) && parsed >= 100) {
+        return parsed;
+      }
+    }
+  }
+  return getServiceTariffAndCategory(treatmentName).tariffSLE;
+}
 
 function normalizeIdentifier(val: string): string {
   const trimmed = val.trim().toLowerCase();
@@ -275,13 +409,22 @@ const INITIAL_CLIENTS: ClientRecord[] = [
         id: 'hist_1',
         dayDateTime: 'Saturday, Oct 3, 2026 — 2:15 PM',
         treatment: 'Laser Teeth Whitening',
-        ratingOrPayment: 'Paid Full Cash (Receipt #089) · Glowing & Smooth (5/5)',
+        ratingOrPayment: 'Paid SLE 1,800 Cash (Receipt #089) · Glowing & Smooth (5/5)',
         specialist: 'Senior Dental Aesthetician',
         notes: 'Shade improved by 4 levels. Advised 48hr stain-free diet.',
         specialistNotes: 'Used 16% hydrogen peroxide gel with desensitizing potassium nitrate serum. Zero gingival irritation.',
         adminResponse: 'Wonderful progress! Continue using sensitivity toothpaste for 1 week.',
         adminRespondedBy: PRIMARY_ADMIN_EMAIL,
         adminRespondedAt: 'Sunday, Oct 4, 2026 — 9:15 AM'
+      },
+      {
+        id: 'hist_1b',
+        dayDateTime: 'Saturday, Aug 22, 2026 — 11:00 AM',
+        treatment: 'HydraFacial Luxury Glow',
+        ratingOrPayment: 'Paid SLE 1,450 Cash (Receipt #041) · Glowing & Smooth (5/5)',
+        specialist: 'Sidratu Sesay',
+        notes: 'Deep vortex extraction and antioxidant peptide infusion completed.',
+        specialistNotes: 'Client responded well to hyaluronic booster.'
       }
     ]
   },
@@ -305,6 +448,17 @@ const INITIAL_CLIENTS: ClientRecord[] = [
         consentSignedBy: 'Ibrahim Koroma',
         createdAt: 'Monday, Oct 19, 2026 — 11:40 AM',
         status: 'Confirmed'
+      },
+      {
+        id: 'appt_2b',
+        treatment: 'HydraFacial Luxury Glow',
+        date: '2026-10-28',
+        time: '16:00',
+        frequency: 'Monthly',
+        notes: 'Pre-event skin brightening session',
+        consentSignedBy: 'Ibrahim Koroma',
+        createdAt: 'Tuesday, Oct 20, 2026 — 09:30 AM',
+        status: 'Confirmed'
       }
     ],
     pastHistory: [
@@ -312,10 +466,19 @@ const INITIAL_CLIENTS: ClientRecord[] = [
         id: 'hist_2',
         dayDateTime: 'Wednesday, Sep 16, 2026 — 1:00 PM',
         treatment: 'Tooth Scaling & Polishing',
-        ratingOrPayment: 'Paid Full Cash (Receipt #054)',
+        ratingOrPayment: 'Paid SLE 850 Cash (Receipt #054)',
         specialist: 'Clinic Dental Officer',
         notes: 'Completed full ultrasonic scaling. Ready for orthodontic assessment.',
         specialistNotes: 'Mild supragingival calculus cleared on lower anterior teeth.'
+      },
+      {
+        id: 'hist_2b',
+        dayDateTime: 'Thursday, Sep 24, 2026 — 3:30 PM',
+        treatment: 'PRP (Platelet-Rich Plasma) Rejuvenation',
+        ratingOrPayment: 'Paid SLE 2,400 Mobile Money (Receipt #068) · Glowing & Smooth (5/5)',
+        specialist: 'Sidratu Sesay',
+        notes: 'First session of under-eye and cheek collagen induction.',
+        specialistNotes: 'Centrifuged autologous PRP applied with 1.0mm microneedling.'
       }
     ]
   }
@@ -416,6 +579,13 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [showAdminPasswordField, setShowAdminPasswordField] = useState(false);
 
+  // Firebase Auth & Real-Time Firestore State
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [firestoreConnected, setFirestoreConnected] = useState(false);
+  const [drawerAdminPassword, setDrawerAdminPassword] = useState('');
+  const [showDrawerAdminUnlock, setShowDrawerAdminUnlock] = useState(false);
+
   // Customer Appointment Form State
   const todayStr = new Date().toISOString().split('T')[0];
   const [apptTreatment, setApptTreatment] = useState('HydraFacial Luxury Glow');
@@ -447,6 +617,74 @@ export default function App() {
   const [selectedClientId, setSelectedClientId] = useState<string>(
     clientsDB[0]?.id || 'client_1'
   );
+  const [summaryViewFilter, setSummaryViewFilter] = useState<'all' | 'booked' | 'completed'>('all');
+
+  // Official Admin Signature & Access Configuration ("change admin sig")
+  const [adminSignature, setAdminSignature] = useState<AdminSignatureConfig>(() => {
+    try {
+      const saved = localStorage.getItem('sidratu_admin_signature');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_ADMIN_SIGNATURE,
+          ...parsed,
+          customAccessCode: parsed.customAccessCode || ADMIN_ACCESS_PASSWORD
+        };
+      }
+      return DEFAULT_ADMIN_SIGNATURE;
+    } catch {
+      return DEFAULT_ADMIN_SIGNATURE;
+    }
+  });
+  const [isEditingAdminSig, setIsEditingAdminSig] = useState(false);
+  const [sigDraftName, setSigDraftName] = useState(adminSignature.signerName);
+  const [sigDraftTitle, setSigDraftTitle] = useState(adminSignature.signerTitle);
+  const [sigDraftEmail, setSigDraftEmail] = useState(adminSignature.signerEmail);
+  const [sigDraftStyle, setSigDraftStyle] = useState<'script' | 'formal' | 'stamp'>(
+    adminSignature.signatureStyle
+  );
+  const [sigDraftNote, setSigDraftNote] = useState(adminSignature.verificationNote);
+  const [sigDraftCode, setSigDraftCode] = useState(
+    adminSignature.customAccessCode || ADMIN_ACCESS_PASSWORD
+  );
+
+  const saveAdminSignatureChanges = (
+    overridePreset?: Omit<AdminSignatureConfig, 'customAccessCode'>
+  ) => {
+    const nextConfig: AdminSignatureConfig = overridePreset
+      ? {
+          ...overridePreset,
+          customAccessCode: sigDraftCode.trim() || ADMIN_ACCESS_PASSWORD
+        }
+      : {
+          signerName: sigDraftName.trim() || 'Sidratu Sesay',
+          signerTitle: sigDraftTitle.trim() || 'Founder & Lead Aesthetician',
+          signerEmail: sigDraftEmail.trim() || PRIMARY_ADMIN_EMAIL,
+          signatureStyle: sigDraftStyle,
+          verificationNote:
+            sigDraftNote.trim() ||
+            'Official Clinic Authorization · 101 Jomo Kenyatta Road, Freetown',
+          customAccessCode: sigDraftCode.trim() || ADMIN_ACCESS_PASSWORD
+        };
+
+    setAdminSignature(nextConfig);
+    setSigDraftName(nextConfig.signerName);
+    setSigDraftTitle(nextConfig.signerTitle);
+    setSigDraftEmail(nextConfig.signerEmail);
+    setSigDraftStyle(nextConfig.signatureStyle);
+    setSigDraftNote(nextConfig.verificationNote);
+    setSigDraftCode(nextConfig.customAccessCode);
+    setSheetSecSpecialist(`${nextConfig.signerName} (${nextConfig.signerEmail})`);
+    try {
+      localStorage.setItem('sidratu_admin_signature', JSON.stringify(nextConfig));
+    } catch {
+      // ignore
+    }
+    setIsEditingAdminSig(false);
+    showNotification(
+      `Admin signature updated to "${nextConfig.signerName} — ${nextConfig.signerTitle}".`
+    );
+  };
 
   // Admin Record Sheet Editable State
   const [sheetVisitDateTime, setSheetVisitDateTime] = useState(getFormattedDayDateTime());
@@ -690,6 +928,181 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [clientsDB]);
 
+  // Listen to Firebase Auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      setFirebaseUser(user);
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Attach real-time Firestore listeners once Firebase Auth is ready and user is authenticated
+  useEffect(() => {
+    if (!authReady || !firebaseUser) {
+      setFirestoreConnected(false);
+      return;
+    }
+
+    const canQueryAllAsAdmin =
+      isFirebaseBootstrappedAdmin(firebaseUser) &&
+      currentUser !== null &&
+      currentUser.role !== 'Customer';
+
+    const clientsRef = canQueryAllAsAdmin
+      ? collection(db, 'clients')
+      : query(collection(db, 'clients'), where('ownerUid', '==', firebaseUser.uid));
+
+    const apptsRef = canQueryAllAsAdmin
+      ? collection(db, 'appointments')
+      : query(collection(db, 'appointments'), where('ownerUid', '==', firebaseUser.uid));
+
+    const historyRef = canQueryAllAsAdmin
+      ? collection(db, 'treatmentHistory')
+      : query(collection(db, 'treatmentHistory'), where('ownerUid', '==', firebaseUser.uid));
+
+    const unsubClients = onSnapshot(
+      clientsRef,
+      snapshot => {
+        setFirestoreConnected(true);
+        if (snapshot.empty) return;
+        setClientsDB(prev => {
+          const byId = new Map(prev.map(c => [c.id, c]));
+          snapshot.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const existing = byId.get(docSnap.id);
+            byId.set(docSnap.id, {
+              id: docSnap.id,
+              name: data.name || existing?.name || 'Clinic Client',
+              phone: data.phone ?? existing?.phone ?? '',
+              email: data.email ?? existing?.email ?? '',
+              address: data.address ?? existing?.address ?? 'Freetown, Sierra Leone',
+              allergies: data.allergies ?? existing?.allergies ?? 'None',
+              dob: data.dob ?? existing?.dob ?? '',
+              avatarBase64: existing?.avatarBase64,
+              quickNotes: data.quickNotes ?? existing?.quickNotes ?? '',
+              newAppointments: existing?.newAppointments || [],
+              pastHistory: existing?.pastHistory || []
+            });
+          });
+          return Array.from(byId.values());
+        });
+      },
+      error => {
+        handleFirestoreError(error, OperationType.GET, 'clients');
+      }
+    );
+
+    const unsubAppts = onSnapshot(
+      apptsRef,
+      snapshot => {
+        setFirestoreConnected(true);
+        if (snapshot.empty) return;
+        setClientsDB(prev => {
+          const apptsByClient = new Map<string, Appointment[]>();
+          snapshot.docs.forEach(docSnap => {
+            const d = docSnap.data();
+            const cid = d.clientId;
+            if (!cid) return;
+            const item: Appointment = {
+              id: docSnap.id,
+              treatment: d.treatment || 'Clinic Consultation',
+              date: d.date || '',
+              time: d.time || '',
+              notes: d.notes || '',
+              consentSignedBy: d.consentSignedBy || d.clientName || 'Client',
+              createdAt:
+                typeof d.createdAt?.toDate === 'function'
+                  ? d.createdAt.toDate().toLocaleString()
+                  : getFormattedDayDateTime(),
+              status: d.status || 'Confirmed',
+              frequency: d.frequency || 'None',
+              adminResponse: d.adminResponse || undefined,
+              adminRespondedBy: d.adminRespondedBy || undefined,
+              adminRespondedAt: d.adminRespondedAt || undefined
+            };
+            const list = apptsByClient.get(cid) || [];
+            list.push(item);
+            apptsByClient.set(cid, list);
+          });
+
+          return prev.map(c => {
+            const remoteList = apptsByClient.get(c.id);
+            if (!remoteList) return c;
+            const mergedMap = new Map<string, Appointment>();
+            (c.newAppointments || []).forEach(a => mergedMap.set(a.id, a));
+            remoteList.forEach(a => mergedMap.set(a.id, a));
+            return {
+              ...c,
+              newAppointments: Array.from(mergedMap.values())
+            };
+          });
+        });
+      },
+      error => {
+        handleFirestoreError(error, OperationType.GET, 'appointments');
+      }
+    );
+
+    const unsubHistory = onSnapshot(
+      historyRef,
+      snapshot => {
+        setFirestoreConnected(true);
+        if (snapshot.empty) return;
+        setClientsDB(prev => {
+          const histByClient = new Map<string, HistoryEntry[]>();
+          snapshot.docs.forEach(docSnap => {
+            const d = docSnap.data();
+            const cid = d.clientId;
+            if (!cid) return;
+            const item: HistoryEntry = {
+              id: docSnap.id,
+              dayDateTime: d.dayDateTime || getFormattedDayDateTime(),
+              treatment: d.treatment || 'Clinic Session',
+              ratingOrPayment: d.ratingOrPayment || 'Completed',
+              specialist: d.specialist || 'Clinic Specialist',
+              notes: d.notes || '',
+              specialistNotes: d.specialistNotes || undefined,
+              adminResponse: d.adminResponse || undefined,
+              adminRespondedBy: d.adminRespondedBy || undefined,
+              adminRespondedAt: d.adminRespondedAt || undefined
+            };
+            const list = histByClient.get(cid) || [];
+            list.push(item);
+            histByClient.set(cid, list);
+          });
+
+          return prev.map(c => {
+            const remoteList = histByClient.get(c.id);
+            if (!remoteList) return c;
+            const mergedMap = new Map<string, HistoryEntry>();
+            (c.pastHistory || []).forEach(h => mergedMap.set(h.id, h));
+            remoteList.forEach(h => {
+              const prevEntry = mergedMap.get(h.id);
+              mergedMap.set(h.id, {
+                ...h,
+                photoBase64: prevEntry?.photoBase64
+              });
+            });
+            return {
+              ...c,
+              pastHistory: Array.from(mergedMap.values())
+            };
+          });
+        });
+      },
+      error => {
+        handleFirestoreError(error, OperationType.GET, 'treatmentHistory');
+      }
+    );
+
+    return () => {
+      unsubClients();
+      unsubAppts();
+      unsubHistory();
+    };
+  }, [authReady, firebaseUser, currentUser?.role]);
+
   // Sync body classes for accessibility & theme
   useEffect(() => {
     document.body.classList.toggle('large-text-mode', largeTextMode);
@@ -780,13 +1193,17 @@ export default function App() {
     const address = addressInput.trim() || 'Freetown, Sierra Leone';
     const cleanPassword = passwordInput.trim();
 
-    if (!identifier && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
+    const customCode = (adminSignature.customAccessCode || ADMIN_ACCESS_PASSWORD).trim();
+    const isCodeMatch = (val: string) =>
+      val === ADMIN_ACCESS_PASSWORD || (Boolean(customCode) && val === customCode);
+
+    if (!identifier && !isCodeMatch(cleanPassword)) {
       showNotification('Please enter your email address or phone number.');
       return;
     }
 
     const detectedStaffRole = detectRole(identifier);
-    const enteredCodeInIdentifier = identifier === ADMIN_ACCESS_PASSWORD;
+    const enteredCodeInIdentifier = isCodeMatch(identifier);
     const isAttemptingAdmin =
       detectedStaffRole !== 'Customer' ||
       enteredCodeInIdentifier ||
@@ -797,18 +1214,18 @@ export default function App() {
 
     if (isAttemptingAdmin) {
       const isPasswordValid =
-        cleanPassword === ADMIN_ACCESS_PASSWORD ||
-        (enteredCodeInIdentifier && cleanPassword === ADMIN_ACCESS_PASSWORD) ||
+        isCodeMatch(cleanPassword) ||
+        (enteredCodeInIdentifier && isCodeMatch(cleanPassword)) ||
         (enteredCodeInIdentifier && !showAdminPasswordField);
 
-      // Strictly require password @sidratu82 whenever an admin email/phone is used or admin access is requested
-      if (detectedStaffRole !== 'Customer' && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
+      // Strictly require password @sidratu82 (or configured Admin code) whenever an admin email/phone is used or admin access is requested
+      if (detectedStaffRole !== 'Customer' && !isCodeMatch(cleanPassword)) {
         setShowAdminPasswordField(true);
         showNotification('Admin access requires the valid Admin password.');
         return;
       }
 
-      if (!isPasswordValid && cleanPassword !== ADMIN_ACCESS_PASSWORD) {
+      if (!isPasswordValid && !isCodeMatch(cleanPassword)) {
         setShowAdminPasswordField(true);
         showNotification('Invalid Admin password or access code. Admin access denied.');
         return;
@@ -891,11 +1308,132 @@ export default function App() {
       lastLoadedClientIdRef.current = null;
       setSelectedClientId(existingClient.id);
     }
+
+    if (auth.currentUser) {
+      void syncClientProfileToFirestore({
+        ...existingClient,
+        role
+      });
+    }
   };
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     executeLogin(loginName, loginIdentifier, loginAddress, loginPassword);
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      const gEmail = (user.email || '').trim();
+      const gName = (user.displayName || gEmail.split('@')[0] || 'Clinic Client').trim();
+      const cleanPass = loginPassword.trim();
+
+      // Never grant Admin access without the @sidratu82 password/code
+      const staffRole = detectRole(gEmail);
+      const grantedRole: Role =
+        cleanPass === ADMIN_ACCESS_PASSWORD
+          ? staffRole !== 'Customer'
+            ? staffRole
+            : 'Owner'
+          : 'Customer';
+
+      const normalizedEmail = normalizeIdentifier(gEmail);
+      let existingClient = clientsDB.find(
+        c => normalizeIdentifier(c.email || '') === normalizedEmail
+      );
+
+      let updatedClients = [...clientsDB];
+      if (!existingClient) {
+        existingClient = {
+          id: `client_${user.uid.slice(0, 20)}`,
+          name: gName,
+          phone: loginIdentifier && !loginIdentifier.includes('@') ? loginIdentifier.trim() : '',
+          email: gEmail,
+          address: loginAddress.trim() || 'Freetown, Sierra Leone',
+          allergies: 'None',
+          dob: '',
+          quickNotes: '',
+          newAppointments: [],
+          pastHistory: []
+        };
+        updatedClients = [existingClient, ...clientsDB];
+        setClientsDB(updatedClients);
+      }
+
+      const activeUser = {
+        ...existingClient,
+        role: grantedRole
+      };
+
+      setCurrentUser(activeUser);
+      setLoginPassword('');
+      setProfName(activeUser.name || '');
+      setProfPhone(activeUser.phone || '');
+      setProfEmail(activeUser.email || '');
+      setProfAddress(activeUser.address || '');
+      setProfAllergies(activeUser.allergies || '');
+      setProfDOB(activeUser.dob || '');
+      setApptConsentSignature(activeUser.name || '');
+
+      await syncClientProfileToFirestore({
+        ...existingClient,
+        ownerUid: user.uid,
+        role: grantedRole
+      });
+
+      if (grantedRole !== 'Customer') {
+        setMainView('admin');
+        const firstCustomer = updatedClients.find(
+          c =>
+            normalizeIdentifier(c.email || '') !== normalizeIdentifier(PRIMARY_ADMIN_EMAIL) &&
+            normalizeIdentifier(c.email || '') !== normalizeIdentifier(SIDRATU_ADMIN_EMAIL)
+        );
+        const targetId = firstCustomer?.id || updatedClients[0]?.id || existingClient.id;
+        lastLoadedClientIdRef.current = null;
+        setSelectedClientId(targetId);
+        showNotification(`Signed in with Google as ${gName} (${grantedRole}). Synced with Firestore.`);
+      } else {
+        setMainView('customer');
+        setCustomerSection('dashboard');
+        lastLoadedClientIdRef.current = null;
+        setSelectedClientId(existingClient.id);
+        showNotification(`Signed in with Google as ${gName}. Connected to Firestore.`);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Google Sign-In was cancelled or failed.';
+      showNotification(`Google Sign-In: ${msg}`);
+    }
+  };
+
+  const handleUnlockAdminInDrawer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const entered = drawerAdminPassword.trim();
+    const customCode = (adminSignature.customAccessCode || ADMIN_ACCESS_PASSWORD).trim();
+    if (entered !== ADMIN_ACCESS_PASSWORD && entered !== customCode) {
+      showNotification('Invalid Admin password/code. Access to Admin is restricted.');
+      return;
+    }
+    const staffRole = detectRole(currentUser.email || currentUser.phone || '');
+    const nextRole: Role = staffRole !== 'Customer' ? staffRole : 'Owner';
+    const upgradedUser = {
+      ...currentUser,
+      role: nextRole
+    };
+    setCurrentUser(upgradedUser);
+    setDrawerAdminPassword('');
+    setShowDrawerAdminUnlock(false);
+    setProfileDrawerOpen(false);
+    setMainView('admin');
+    if (auth.currentUser) {
+      void syncClientProfileToFirestore({
+        ...upgradedUser,
+        role: nextRole
+      });
+    }
+    showNotification(`Admin Mode (${nextRole}) unlocked.`);
   };
 
   const APPOINTMENT_TREATMENT_GROUPS = useMemo(
@@ -987,10 +1525,12 @@ export default function App() {
       status: 'Confirmed'
     };
 
-    const targetId =
+    const targetClientRecord =
       currentUser.role !== 'Customer' && selectedAdminClient
-        ? selectedAdminClient.id
-        : currentUser.id;
+        ? selectedAdminClient
+        : currentUser;
+    const targetId = targetClientRecord.id;
+
     setClientsDB(prev =>
       prev.map(c =>
         c.id === targetId
@@ -999,9 +1539,17 @@ export default function App() {
       )
     );
 
+    if (auth.currentUser) {
+      void saveAppointmentToFirestore(targetClientRecord, {
+        ...newAppt,
+        clientId: targetId,
+        clientName: targetClientRecord.name
+      });
+    }
+
     setApptNotes('');
     showNotification(
-      `New Appointment Confirmed (${apptFrequency !== 'None' ? `${apptFrequency} Plan` : 'One-Time'})! Synced to Admin (${PRIMARY_ADMIN_EMAIL}).`
+      `New Appointment Confirmed (${apptFrequency !== 'None' ? `${apptFrequency} Plan` : 'One-Time'})! Synced to Firestore & Admin (${PRIMARY_ADMIN_EMAIL}).`
     );
   };
 
@@ -1018,10 +1566,12 @@ export default function App() {
       notes: histNotes.trim()
     };
 
-    const targetId =
+    const targetClientRecord =
       currentUser.role !== 'Customer' && selectedAdminClient
-        ? selectedAdminClient.id
-        : currentUser.id;
+        ? selectedAdminClient
+        : currentUser;
+    const targetId = targetClientRecord.id;
+
     setClientsDB(prev =>
       prev.map(c =>
         c.id === targetId
@@ -1030,9 +1580,17 @@ export default function App() {
       )
     );
 
+    if (auth.currentUser) {
+      void saveHistoryToFirestore(targetClientRecord, {
+        ...newEntry,
+        clientId: targetId,
+        clientName: targetClientRecord.name
+      });
+    }
+
     setHistTreatment('');
     setHistNotes('');
-    showNotification(`Progress update saved and visible to Admin (${PRIMARY_ADMIN_EMAIL}).`);
+    showNotification(`Progress update saved to Firestore and visible to Admin (${PRIMARY_ADMIN_EMAIL}).`);
   };
 
   // Admin Responds to a Specific Appointment or History Log with Sidratu82sesay@gmail.com
@@ -1049,9 +1607,11 @@ export default function App() {
     }
 
     const responderEmail =
-      currentUser?.email && currentUser.email.includes('@')
+      adminSignature.signerEmail ||
+      (currentUser?.email && currentUser.email.includes('@')
         ? currentUser.email
-        : PRIMARY_ADMIN_EMAIL;
+        : PRIMARY_ADMIN_EMAIL);
+    const responderLabel = `${adminSignature.signerName} (${responderEmail})`;
     const timestamp = getFormattedDayDateTime();
 
     let targetClient: ClientRecord | undefined;
@@ -1070,7 +1630,7 @@ export default function App() {
               ...a,
               status: 'Responded',
               adminResponse: responseText,
-              adminRespondedBy: responderEmail,
+              adminRespondedBy: responderLabel,
               adminRespondedAt: timestamp
             };
           })
@@ -1079,14 +1639,17 @@ export default function App() {
     );
 
     setReplyDrafts(prev => ({ ...prev, [draftKey]: '' }));
-    showNotification(`Response sent & recorded by ${responderEmail}`);
+    if (auth.currentUser) {
+      void respondToAppointmentInFirestore(apptId, responseText, responderLabel, timestamp);
+    }
+    showNotification(`Response signed & recorded by ${responderLabel}`);
 
     if (openEmailModalAfter && targetClient) {
       setEmailModalData({
         clientName: targetClient.name,
         clientEmail: targetClient.email || 'client@example.com',
         subject: `Sidratu Beauty Therapy — Appointment Update (${targetAppt?.treatment || 'Clinic Visit'})`,
-        body: `Dear ${targetClient.name},\n\n${responseText}\n\nAppointment Details:\nTreatment: ${targetAppt?.treatment}\nScheduled Date & Time: ${targetAppt?.date} at ${targetAppt?.time}\nLocation: 101 Jomo Kenyatta Road, Freetown\n\nWarm regards,\nSidratu Sesay\nSidratu Beauty Therapy Skin Care\nAdmin Email: ${PRIMARY_ADMIN_EMAIL}`
+        body: `Dear ${targetClient.name},\n\n${responseText}\n\nAppointment Details:\nTreatment: ${targetAppt?.treatment}\nScheduled Date & Time: ${targetAppt?.date} at ${targetAppt?.time}\nLocation: 101 Jomo Kenyatta Road, Freetown\n\nWarm regards,\n${adminSignature.signerName}\n${adminSignature.signerTitle}\nSidratu Beauty Therapy Skin Care\nAdmin Email: ${responderEmail}`
       });
     }
   };
@@ -1133,6 +1696,13 @@ export default function App() {
     );
 
     setReplyDrafts(prev => ({ ...prev, [draftKey]: '' }));
+    if (auth.currentUser) {
+      void respondToHistoryInFirestore(histId, {
+        adminResponse: responseText,
+        adminRespondedBy: responderEmail,
+        adminRespondedAt: timestamp
+      });
+    }
     showNotification(`Clinical follow-up response saved by ${responderEmail}`);
 
     if (openEmailModalAfter && targetClient) {
@@ -1159,6 +1729,11 @@ export default function App() {
         };
       })
     );
+    if (auth.currentUser) {
+      void respondToHistoryInFirestore(histId, {
+        specialistNotes: noteText
+      });
+    }
     setSpecialistNoteDrafts(prev => {
       const next = { ...prev };
       delete next[key];
@@ -1231,6 +1806,9 @@ export default function App() {
       }
       return updated;
     });
+    if (auth.currentUser) {
+      void deleteAppointmentFromFirestore(apptId);
+    }
     showNotification(`Deleted appointment: "${removedName}".`);
   };
 
@@ -1253,6 +1831,9 @@ export default function App() {
       }
       return updated;
     });
+    if (auth.currentUser) {
+      void deleteHistoryFromFirestore(histId);
+    }
     showNotification(`Deleted past history session: "${removedTreatment}".`);
   };
 
@@ -1333,24 +1914,28 @@ export default function App() {
 
     const targetId = selectedAdminClient?.id || selectedClientId;
 
+    const newHistoryEntry: HistoryEntry | null = hasNewSessionData
+      ? {
+          id: 'hist_' + Date.now(),
+          dayDateTime: visitStamp,
+          treatment: treatment || 'Clinic Consultation & Check-In',
+          ratingOrPayment: payment || 'Payment Recorded in Office Ledger',
+          specialist,
+          notes: notes || 'Client attended clinic session.',
+          specialistNotes: specialistNotes || undefined,
+          photoBase64: sheetSecPhoto || undefined,
+          adminRespondedBy: PRIMARY_ADMIN_EMAIL,
+          adminRespondedAt: visitStamp
+        }
+      : null;
+
     setClientsDB(prev => {
       const updated = prev.map(c => {
         if (c.id !== targetId) return c;
 
         const updatedHistory = [...(c.pastHistory || [])];
-        if (hasNewSessionData) {
-          updatedHistory.unshift({
-            id: 'hist_' + Date.now(),
-            dayDateTime: visitStamp,
-            treatment: treatment || 'Clinic Consultation & Check-In',
-            ratingOrPayment: payment || 'Payment Recorded in Office Ledger',
-            specialist,
-            notes: notes || 'Client attended clinic session.',
-            specialistNotes: specialistNotes || undefined,
-            photoBase64: sheetSecPhoto || undefined,
-            adminRespondedBy: PRIMARY_ADMIN_EMAIL,
-            adminRespondedAt: visitStamp
-          });
+        if (newHistoryEntry) {
+          updatedHistory.unshift(newHistoryEntry);
         }
 
         return {
@@ -1374,6 +1959,27 @@ export default function App() {
       return updated;
     });
 
+    if (auth.currentUser) {
+      const updatedClientObj = {
+        id: targetId,
+        name: sheetClientName,
+        phone: sheetClientPhone,
+        email: sheetClientEmail,
+        address: sheetClientAddress,
+        allergies: sheetClientAllergies,
+        dob: sheetClientDOB,
+        quickNotes: sheetQuickNotes
+      };
+      void syncClientProfileToFirestore(updatedClientObj);
+      if (newHistoryEntry) {
+        void saveHistoryToFirestore(updatedClientObj, {
+          ...newHistoryEntry,
+          clientId: targetId,
+          clientName: sheetClientName
+        });
+      }
+    }
+
     setSheetSecTreatment('');
     setSheetSecPayment('');
     setSheetSecNotes('');
@@ -1381,7 +1987,7 @@ export default function App() {
     setSheetSecPhoto(null);
     showNotification(
       hasNewSessionData
-        ? `Client Record Paper & Session saved to ${sheetClientName}'s Past History (${visitStamp}).`
+        ? `Client Record Paper & Session saved to Firestore & ${sheetClientName}'s Past History (${visitStamp}).`
         : `Client profile, Date of Birth & Quick Notes saved for ${sheetClientName}.`
     );
   };
@@ -1475,6 +2081,9 @@ export default function App() {
     setSheetSecSpecialistNotes('');
     setSheetSecPhoto(null);
     setClientPendingDelete(null);
+    if (auth.currentUser) {
+      void deleteClientFromFirestore(clientId);
+    }
     showNotification(`Client record "${deletedName}" has been permanently deleted.`);
   };
 
@@ -1535,6 +2144,19 @@ export default function App() {
       setSheetClientDOB(updatedDOB);
     }
 
+    if (auth.currentUser) {
+      void syncClientProfileToFirestore({
+        id: currentUser.id,
+        name: updatedName,
+        phone: updatedPhone,
+        email: updatedEmail,
+        address: updatedAddress,
+        allergies: updatedAllergies,
+        dob: updatedDOB,
+        role: currentUser.role
+      });
+    }
+
     setApptConsentSignature(updatedName);
     setProfileDrawerOpen(false);
     showNotification('Your personal profile and clinic record sheet have been updated.');
@@ -1574,6 +2196,11 @@ export default function App() {
     setMainView('customer');
     setLoginPassword('');
     setShowAdminPasswordField(false);
+    setDrawerAdminPassword('');
+    setShowDrawerAdminUnlock(false);
+    if (auth.currentUser) {
+      void firebaseSignOut(auth);
+    }
   };
 
   const toggleGoalSelection = (goalTitle: string) => {
@@ -1700,22 +2327,209 @@ export default function App() {
     [clientsDB, todayStr]
   );
 
-  // Memoized monthly completed treatments chart data
-  const monthlyChartData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    clientsDB.forEach(c => {
-      (c.pastHistory || []).forEach(h => {
-        const rawPart = (h.dayDateTime || '').split('—')[0].trim();
-        const parsed = new Date(rawPart);
-        const monthLabel = !isNaN(parsed.getTime())
-          ? parsed.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
-          : 'Oct 26';
-        counts[monthLabel] = (counts[monthLabel] || 0) + 1;
+  // Memoized Executive Admin Dashboard Summary Analytics: Top-Performing Services & Total Revenue Trends
+  const adminSummaryAnalytics = useMemo(() => {
+    const serviceMap = new Map<
+      string,
+      {
+        treatment: string;
+        category: string;
+        bookedCount: number;
+        completedCount: number;
+        bookedRevenueSLE: number;
+        realizedRevenueSLE: number;
+      }
+    >();
+
+    const monthMap = new Map<
+      string,
+      {
+        month: string;
+        sortKey: number;
+        realizedSLE: number;
+        bookedSLE: number;
+        totalSLE: number;
+        completedCount: number;
+        bookedCount: number;
+      }
+    >();
+
+    const ensureMonthBucket = (dateObj: Date | null, fallbackLabel = 'Oct 26') => {
+      const valid = dateObj && !isNaN(dateObj.getTime());
+      const label = valid
+        ? dateObj!.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+        : fallbackLabel;
+      const sortKey = valid
+        ? dateObj!.getFullYear() * 100 + dateObj!.getMonth()
+        : 202609;
+      if (!monthMap.has(label)) {
+        monthMap.set(label, {
+          month: label,
+          sortKey,
+          realizedSLE: 0,
+          bookedSLE: 0,
+          totalSLE: 0,
+          completedCount: 0,
+          bookedCount: 0
+        });
+      }
+      return monthMap.get(label)!;
+    };
+
+    const ensureServiceEntry = (treatmentRaw: string) => {
+      const name = (treatmentRaw || 'Clinic Consultation').trim();
+      if (!serviceMap.has(name)) {
+        const info = getServiceTariffAndCategory(name);
+        serviceMap.set(name, {
+          treatment: name,
+          category: info.category,
+          bookedCount: 0,
+          completedCount: 0,
+          bookedRevenueSLE: 0,
+          realizedRevenueSLE: 0
+        });
+      }
+      return serviceMap.get(name)!;
+    };
+
+    clientsDB.forEach(client => {
+      // 1. Aggregate Booked Appointments
+      (client.newAppointments || []).forEach(appt => {
+        const svc = ensureServiceEntry(appt.treatment);
+        const estSLE = getServiceTariffAndCategory(appt.treatment).tariffSLE;
+        svc.bookedCount += 1;
+        svc.bookedRevenueSLE += estSLE;
+
+        const parsedDate = appt.date ? new Date(appt.date) : null;
+        const bucket = ensureMonthBucket(parsedDate, 'Oct 26');
+        bucket.bookedSLE += estSLE;
+        bucket.totalSLE += estSLE;
+        bucket.bookedCount += 1;
+      });
+
+      // 2. Aggregate Completed Sessions & Realized Revenue
+      (client.pastHistory || []).forEach(hist => {
+        const svc = ensureServiceEntry(hist.treatment);
+        const revSLE = extractSessionRevenueSLE(hist.treatment, hist.ratingOrPayment);
+        svc.completedCount += 1;
+        svc.realizedRevenueSLE += revSLE;
+
+        const rawPart = (hist.dayDateTime || '').split('—')[0].trim();
+        const cleanedDateStr = rawPart.replace(/^[A-Za-z]+,\s*/, '');
+        const parsedDate = cleanedDateStr ? new Date(cleanedDateStr) : null;
+        const bucket = ensureMonthBucket(parsedDate, 'Oct 26');
+        bucket.realizedSLE += revSLE;
+        bucket.totalSLE += revSLE;
+        bucket.completedCount += 1;
       });
     });
-    const entries = Object.entries(counts).map(([month, count]) => ({ month, count }));
-    return entries.length > 0 ? entries : [{ month: 'Oct 26', count: 0 }];
-  }, [clientsDB]);
+
+    const allServices = Array.from(serviceMap.values()).map(item => {
+      const totalInteractions = item.bookedCount + item.completedCount;
+      const totalRevenueSLE = item.bookedRevenueSLE + item.realizedRevenueSLE;
+      return {
+        ...item,
+        totalInteractions,
+        totalRevenueSLE
+      };
+    });
+
+    const totalBookedCount = allServices.reduce((acc, s) => acc + s.bookedCount, 0);
+    const totalCompletedCount = allServices.reduce((acc, s) => acc + s.completedCount, 0);
+    const totalActivityCount = Math.max(totalBookedCount + totalCompletedCount, 1);
+    const totalRealizedSLE = allServices.reduce((acc, s) => acc + s.realizedRevenueSLE, 0);
+    const totalBookedSLE = allServices.reduce((acc, s) => acc + s.bookedRevenueSLE, 0);
+    const combinedRevenueSLE = totalRealizedSLE + totalBookedSLE;
+
+    const rankedServices = allServices
+      .map(s => {
+        const activeCount =
+          summaryViewFilter === 'booked'
+            ? s.bookedCount
+            : summaryViewFilter === 'completed'
+            ? s.completedCount
+            : s.totalInteractions;
+        const activeDenom =
+          summaryViewFilter === 'booked'
+            ? Math.max(totalBookedCount, 1)
+            : summaryViewFilter === 'completed'
+            ? Math.max(totalCompletedCount, 1)
+            : totalActivityCount;
+        const activeRevenueSLE =
+          summaryViewFilter === 'booked'
+            ? s.bookedRevenueSLE
+            : summaryViewFilter === 'completed'
+            ? s.realizedRevenueSLE
+            : s.totalRevenueSLE;
+        return {
+          ...s,
+          activeCount,
+          activeRevenueSLE,
+          sharePct: Math.round((activeCount / activeDenom) * 100)
+        };
+      })
+      .filter(s =>
+        summaryViewFilter === 'booked'
+          ? s.bookedCount > 0 || s.totalInteractions > 0
+          : summaryViewFilter === 'completed'
+          ? s.completedCount > 0 || s.totalInteractions > 0
+          : true
+      )
+      .sort((a, b) => {
+        if (b.activeCount !== a.activeCount) return b.activeCount - a.activeCount;
+        return b.activeRevenueSLE - a.activeRevenueSLE;
+      });
+
+    const monthlyRevenueTrends = Array.from(monthMap.values()).sort(
+      (a, b) => a.sortKey - b.sortKey
+    );
+
+    if (monthlyRevenueTrends.length === 0) {
+      monthlyRevenueTrends.push({
+        month: 'Oct 26',
+        sortKey: 202609,
+        realizedSLE: 0,
+        bookedSLE: 0,
+        totalSLE: 0,
+        completedCount: 0,
+        bookedCount: 0
+      });
+    }
+
+    let momGrowthPct = 0;
+    if (monthlyRevenueTrends.length >= 2) {
+      const latest = monthlyRevenueTrends[monthlyRevenueTrends.length - 1].totalSLE;
+      const prev = monthlyRevenueTrends[monthlyRevenueTrends.length - 2].totalSLE;
+      if (prev > 0) {
+        momGrowthPct = Math.round(((latest - prev) / prev) * 100);
+      } else if (latest > 0) {
+        momGrowthPct = 100;
+      }
+    }
+
+    const topServiceByBookings =
+      [...allServices].sort((a, b) => {
+        if (b.bookedCount !== a.bookedCount) return b.bookedCount - a.bookedCount;
+        return b.totalRevenueSLE - a.totalRevenueSLE;
+      })[0] || null;
+
+    const avgRevenuePerClientSLE = Math.round(
+      combinedRevenueSLE / Math.max(clientsDB.length, 1)
+    );
+
+    return {
+      rankedServices,
+      monthlyRevenueTrends,
+      totalBookedCount,
+      totalCompletedCount,
+      totalRealizedSLE,
+      totalBookedSLE,
+      combinedRevenueSLE,
+      topServiceByBookings,
+      avgRevenuePerClientSLE,
+      momGrowthPct
+    };
+  }, [clientsDB, summaryViewFilter]);
 
   // Memoized consolidated upcoming appointments & recent history for fast rendering
   const allUpcomingAppointments = useMemo(
@@ -1971,8 +2785,45 @@ export default function App() {
                   Welcome — Sign In or Create Profile
                 </h2>
                 <p className="text-xs text-center opacity-75 mt-1">
-                  Enter your Email or Phone Number to access your appointments and clinic records.
+                  Sign in with Google (Firebase Auth) or enter your details to access your appointments and clinic records.
                 </p>
+              </div>
+
+              {/* Google Sign-In via Firebase Authentication */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  className="w-full py-3 px-4 rounded-xl bg-white hover:bg-gray-50 text-gray-900 font-bold text-sm border-2 border-[#D4AF37] shadow-sm flex items-center justify-center gap-3 transition whitespace-nowrap"
+                >
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    />
+                  </svg>
+                  <span>Continue with Google (Firebase Auth)</span>
+                </button>
+
+                <div className="flex items-center gap-3 py-1">
+                  <div className="h-px bg-[#E6DEC8] flex-1" />
+                  <span className="text-[11px] uppercase tracking-wider opacity-70 font-semibold">
+                    or enter clinic profile details
+                  </span>
+                  <div className="h-px bg-[#E6DEC8] flex-1" />
+                </div>
               </div>
 
               <form onSubmit={handleLoginSubmit} className="space-y-4" aria-label="Login form">
@@ -2137,14 +2988,19 @@ export default function App() {
               </span>
             </div>
 
-            {/* Visual Connection & LocalStorage Sync Status Indicator */}
+            {/* Visual Connection & Firestore / LocalStorage Sync Status Indicator */}
             <div className="flex items-center gap-2">
+              {firestoreConnected && (
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Firestore Live</span>
+                  <span aria-hidden="true">·</span>
+                </span>
+              )}
               {effectiveSyncStatus === 'saved' && (
                 <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  <span>Saved to localStorage</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono-tabular">{lastSavedTime}</span>
+                  <span>Saved ({lastSavedTime})</span>
                 </span>
               )}
               {effectiveSyncStatus === 'saving' && (
@@ -3227,31 +4083,418 @@ export default function App() {
               =================================================================== */}
           {mainView === 'admin' && currentUser.role !== 'Customer' && (
             <div className="space-y-6">
-              {/* CLINIC GROWTH: MONTHLY TREATMENT CHART */}
-              <div className="theming-card p-5 rounded-2xl border border-[#D4AF37] space-y-4">
-                <h2 className="font-display text-xl font-bold flex items-center gap-2">
-                  <BarChart3 className="w-6 h-6 text-[#D4AF37]" />
-                  <span>Clinic Growth: Completed Treatments (Monthly)</span>
-                </h2>
-                <div className="h-64 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height={250} minWidth={0}>
-                    <BarChart data={monthlyChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E6DEC8" />
-                      <XAxis dataKey="month" stroke="#5C4D63" fontSize={12} />
-                      <YAxis stroke="#5C4D63" fontSize={12} allowDecimals={false} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#FAF7F2',
-                          color: '#1F1624',
-                          borderRadius: '12px',
-                          border: '1px solid #D4AF37'
-                        }}
-                      />
-                      <Bar dataKey="count" name="Completed Treatments" fill="#D4AF37" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+              {/* EXECUTIVE DASHBOARD SUMMARY CARD: TOP-PERFORMING SERVICES & TOTAL REVENUE TRENDS */}
+              <section
+                className="theming-card p-6 rounded-2xl border-2 border-[#D4AF37] space-y-6"
+                role="region"
+                aria-label="Admin Dashboard Summary: Top-Performing Services and Total Revenue Trends"
+              >
+                {/* Header & Interactive View Filter */}
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#E6DEC8] pb-4">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-bold tracking-wider text-[#D4AF37]">
+                      <span>EXECUTIVE CLINIC ANALYTICS</span>
+                      <span aria-hidden="true">·</span>
+                      <span>SIGNED AS: {adminSignature.signerName.toUpperCase()}</span>
+                    </div>
+                    <h2 className="font-display text-2xl font-bold flex items-center gap-2.5">
+                      <TrendingUp className="w-6 h-6 text-[#D4AF37] shrink-0" />
+                      <span>Top-Performing Services &amp; Total Revenue Trends</span>
+                    </h2>
+                    <p className="text-xs opacity-80">
+                      Real-time performance metrics computed from{' '}
+                      <strong className="font-mono-tabular">{clientsDB.length}</strong> client records,{' '}
+                      <strong className="font-mono-tabular">
+                        {adminSummaryAnalytics.totalBookedCount}
+                      </strong>{' '}
+                      booked appointments, and{' '}
+                      <strong className="font-mono-tabular">
+                        {adminSummaryAnalytics.totalCompletedCount}
+                      </strong>{' '}
+                      completed clinic sessions.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1 p-1 rounded-xl border border-[#E6DEC8]">
+                      {(
+                        [
+                          { id: 'all', label: 'All Activity' },
+                          { id: 'booked', label: 'Booked Appointments' },
+                          { id: 'completed', label: 'Completed Sessions' }
+                        ] as const
+                      ).map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setSummaryViewFilter(tab.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
+                            summaryViewFilter === tab.id
+                              ? 'gold-btn'
+                              : 'opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingAdminSig(prev => !prev)}
+                      className="px-3.5 py-2 rounded-xl plum-btn text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                      title="Customize Official Admin Signature & Sign-Off"
+                    >
+                      <PenTool className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <span>Change Admin Sig</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+
+                {/* Quick Collapsible Admin Signature Editor ("change admin sig") right inside the Dashboard Summary Card */}
+                {isEditingAdminSig && (
+                  <div className="p-4 rounded-xl border-2 border-[#D4AF37] bg-amber-50/40 dark:bg-white/5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E6DEC8] pb-2.5">
+                      <div>
+                        <h3 className="font-bold text-sm flex items-center gap-2">
+                          <PenTool className="w-4 h-4 text-[#D4AF37]" />
+                          <span>Change Official Admin Signature &amp; Sign-In Credentials</span>
+                        </h3>
+                        <p className="text-xs opacity-75">
+                          Updates the official signature on Client Record Sheets, email dispatches, appointment responses, and Admin sign-in.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {ADMIN_SIGNATURE_PRESETS.map(preset => (
+                          <button
+                            key={preset.signerName}
+                            type="button"
+                            onClick={() => saveAdminSignatureChanges(preset)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition whitespace-nowrap ${
+                              adminSignature.signerName === preset.signerName
+                                ? 'bg-[#3B0944] text-[#F3E5AB] border-[#D4AF37]'
+                                : 'border-[#D4AF37] hover:bg-amber-100/50'
+                            }`}
+                          >
+                            Use {preset.signerName}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <label className="block font-bold mb-1">Admin Signer Full Name</label>
+                        <input
+                          type="text"
+                          value={sigDraftName}
+                          onChange={e => setSigDraftName(e.target.value)}
+                          placeholder="e.g. Sidratu Sesay"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Official Role / Clinical Title</label>
+                        <input
+                          type="text"
+                          value={sigDraftTitle}
+                          onChange={e => setSigDraftTitle(e.target.value)}
+                          placeholder="e.g. Founder & Lead Aesthetician"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Official Admin Email</label>
+                        <input
+                          type="email"
+                          value={sigDraftEmail}
+                          onChange={e => setSigDraftEmail(e.target.value)}
+                          placeholder={PRIMARY_ADMIN_EMAIL}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 font-mono-tabular"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Signature Typography Style</label>
+                        <select
+                          value={sigDraftStyle}
+                          onChange={e =>
+                            setSigDraftStyle(e.target.value as 'script' | 'formal' | 'stamp')
+                          }
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 font-semibold"
+                        >
+                          <option value="script">Calligraphic Script Signature</option>
+                          <option value="formal">Formal Clinical Serif</option>
+                          <option value="stamp">Official Clinic Seal Stamp</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs items-end">
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold mb-1">
+                          Official Stamp / Verification Footer Line
+                        </label>
+                        <input
+                          type="text"
+                          value={sigDraftNote}
+                          onChange={e => setSigDraftNote(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">
+                          Admin Sign-In Access Code (Default: {ADMIN_ACCESS_PASSWORD})
+                        </label>
+                        <input
+                          type="text"
+                          value={sigDraftCode}
+                          onChange={e => setSigDraftCode(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 font-mono-tabular font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E6DEC8]">
+                      <div className="text-xs flex items-center gap-2">
+                        <span className="opacity-75">Live Signature Preview:</span>
+                        <span
+                          className={`px-3 py-1 rounded border border-[#D4AF37] bg-white text-[#3B0944] ${
+                            sigDraftStyle === 'script'
+                              ? 'font-display italic text-base font-bold'
+                              : sigDraftStyle === 'stamp'
+                              ? 'font-mono-tabular uppercase tracking-widest font-extrabold text-xs'
+                              : 'font-display font-bold text-sm'
+                          }`}
+                        >
+                          {sigDraftName || 'Sidratu Sesay'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingAdminSig(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveAdminSignatureChanges()}
+                          className="px-4 py-1.5 rounded-lg gold-btn text-xs font-bold flex items-center gap-1.5"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Save Admin Signature</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4-Metric KPI Strip (Single-elevation flat borders, tabular numerals) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-xl border border-[#E6DEC8] space-y-1">
+                    <div className="text-xs opacity-75 font-semibold">
+                      Total Clinic Revenue (Combined)
+                    </div>
+                    <div className="text-2xl font-extrabold font-mono-tabular text-[#D4AF37]">
+                      SLE {adminSummaryAnalytics.combinedRevenueSLE.toLocaleString()}
+                    </div>
+                    <div className="text-xs opacity-80 font-mono-tabular">
+                      SLE {adminSummaryAnalytics.totalRealizedSLE.toLocaleString()} realized ·{' '}
+                      {adminSummaryAnalytics.momGrowthPct >= 0
+                        ? `+${adminSummaryAnalytics.momGrowthPct}%`
+                        : `${adminSummaryAnalytics.momGrowthPct}%`}{' '}
+                      MoM
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-[#E6DEC8] space-y-1">
+                    <div className="text-xs opacity-75 font-semibold">
+                      Booked Appointment Pipeline
+                    </div>
+                    <div className="text-2xl font-extrabold font-mono-tabular">
+                      SLE {adminSummaryAnalytics.totalBookedSLE.toLocaleString()}
+                    </div>
+                    <div className="text-xs opacity-80 font-mono-tabular">
+                      {adminSummaryAnalytics.totalBookedCount} active booked{' '}
+                      {adminSummaryAnalytics.totalBookedCount === 1 ? 'session' : 'sessions'}
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-[#E6DEC8] space-y-1">
+                    <div className="text-xs opacity-75 font-semibold flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <span>Top Service by Bookings</span>
+                    </div>
+                    <div
+                      className="text-base font-extrabold truncate"
+                      title={
+                        adminSummaryAnalytics.topServiceByBookings?.treatment ||
+                        'HydraFacial Luxury Glow'
+                      }
+                    >
+                      {adminSummaryAnalytics.topServiceByBookings?.treatment ||
+                        'HydraFacial Luxury Glow'}
+                    </div>
+                    <div className="text-xs opacity-80 font-mono-tabular">
+                      {adminSummaryAnalytics.topServiceByBookings?.bookedCount || 0} booked ·{' '}
+                      {adminSummaryAnalytics.topServiceByBookings?.completedCount || 0} completed
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-[#E6DEC8] space-y-1">
+                    <div className="text-xs opacity-75 font-semibold">
+                      Average Revenue per Client
+                    </div>
+                    <div className="text-2xl font-extrabold font-mono-tabular">
+                      SLE {adminSummaryAnalytics.avgRevenuePerClientSLE.toLocaleString()}
+                    </div>
+                    <div className="text-xs opacity-80 font-mono-tabular">
+                      Across {clientsDB.length} registered{' '}
+                      {clientsDB.length === 1 ? 'client' : 'clients'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Two-Column Analytics Grid: Top-Performing Services Leaderboard + Monthly Revenue Trends Chart */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* Left 7 Cols: Top-Performing Services Leaderboard */}
+                  <div className="lg:col-span-7 p-4 rounded-xl border border-[#E6DEC8] space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E6DEC8] pb-2.5">
+                      <div>
+                        <h3 className="font-bold text-sm flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-[#D4AF37]" />
+                          <span>Top-Performing Services (Ranked by Bookings &amp; Revenue)</span>
+                        </h3>
+                        <p className="text-xs opacity-75">
+                          Click any service row to pre-fill the Secretary Record Sheet below.
+                        </p>
+                      </div>
+                      <span className="text-xs font-mono-tabular opacity-75">
+                        Showing top {Math.min(adminSummaryAnalytics.rankedServices.length, 6)} services
+                      </span>
+                    </div>
+
+                    {adminSummaryAnalytics.rankedServices.length === 0 ? (
+                      <div className="p-4 text-xs opacity-75 italic">
+                        No services recorded for this filter yet. Book an appointment or log a session to populate service rankings.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-[#E6DEC8]">
+                        {adminSummaryAnalytics.rankedServices.slice(0, 6).map((svc, idx) => (
+                          <button
+                            key={svc.treatment}
+                            type="button"
+                            onClick={() => {
+                              setSheetSecTreatment(svc.treatment);
+                              showNotification(
+                                `Selected "${svc.treatment}" on the Client Record Sheet.`
+                              );
+                            }}
+                            className="w-full py-2.5 px-2 text-left hover:bg-amber-50/20 transition flex flex-col gap-1.5 group"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="w-6 h-6 rounded-md bg-[#3B0944] text-[#F3E5AB] font-mono-tabular text-xs font-bold flex items-center justify-center shrink-0">
+                                  #{idx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-xs sm:text-sm truncate group-hover:text-[#D4AF37] transition-colors">
+                                    {svc.treatment}
+                                  </div>
+                                  <div className="text-[11px] opacity-75 font-mono-tabular">
+                                    {svc.category} · {svc.bookedCount} booked · {svc.completedCount}{' '}
+                                    completed
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0 font-mono-tabular">
+                                <div className="font-bold text-xs sm:text-sm text-[#D4AF37]">
+                                  SLE {svc.activeRevenueSLE.toLocaleString()}
+                                </div>
+                                <div className="text-[11px] opacity-75">
+                                  {svc.sharePct}% of volume
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="w-full h-1.5 rounded-full bg-[#E6DEC8]/60 overflow-hidden">
+                              <div
+                                className="h-full bg-[#D4AF37] rounded-full transition-all duration-300"
+                                style={{ width: `${Math.max(svc.sharePct, 8)}%` }}
+                              />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right 5 Cols: Monthly Revenue & Treatment Trends Chart */}
+                  <div className="lg:col-span-5 p-4 rounded-xl border border-[#E6DEC8] space-y-3">
+                    <div className="border-b border-[#E6DEC8] pb-2.5">
+                      <h3 className="font-bold text-sm flex items-center gap-1.5">
+                        <BarChart3 className="w-4 h-4 text-[#D4AF37]" />
+                        <span>Monthly Revenue Trends (SLE)</span>
+                      </h3>
+                      <p className="text-xs opacity-75">
+                        Realized session receipts vs. booked appointment pipeline by month.
+                      </p>
+                    </div>
+
+                    <div className="h-64 w-full min-w-0">
+                      <ResponsiveContainer width="100%" height={245} minWidth={0}>
+                        <BarChart data={adminSummaryAnalytics.monthlyRevenueTrends}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E6DEC8" />
+                          <XAxis dataKey="month" stroke="#5C4D63" fontSize={12} />
+                          <YAxis
+                            stroke="#5C4D63"
+                            fontSize={11}
+                            tickFormatter={val => `SLE ${val}`}
+                          />
+                          <Tooltip
+                            formatter={(value: any, name: any) => [
+                              `SLE ${Number(value || 0).toLocaleString()}`,
+                              name
+                            ]}
+                            contentStyle={{
+                              backgroundColor: '#FAF7F2',
+                              color: '#1F1624',
+                              borderRadius: '12px',
+                              border: '1px solid #D4AF37',
+                              fontSize: '12px'
+                            }}
+                          />
+                          <Bar
+                            dataKey="realizedSLE"
+                            name="Realized Revenue (Completed)"
+                            fill="#3B0944"
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar
+                            dataKey="bookedSLE"
+                            name="Booked Pipeline Revenue"
+                            fill="#D4AF37"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tabular pt-1 border-t border-[#E6DEC8]">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-[#3B0944] inline-block" />
+                        <span>Realized: SLE {adminSummaryAnalytics.totalRealizedSLE.toLocaleString()}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-[#D4AF37] inline-block" />
+                        <span>Booked: SLE {adminSummaryAnalytics.totalBookedSLE.toLocaleString()}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
               {/* TODAY'S APPOINTMENTS VISUAL ALERT & SUMMARY SECTION */}
               <div
@@ -4439,6 +5682,62 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* OFFICIAL ADMIN AUTHORIZATION & SIGNATURE BLOCK (Printable & Customizable) */}
+                  <div className="p-4 rounded-xl border border-[#D4AF37] bg-amber-50/50 text-gray-900 flex flex-wrap items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-bold tracking-wider uppercase text-purple-900 flex items-center gap-1.5">
+                        <PenTool className="w-3.5 h-3.5 text-[#D4AF37]" />
+                        <span>Authorized Admin Signature &amp; Clinical Stamp</span>
+                      </div>
+                      <div
+                        className={`text-[#3B0944] ${
+                          adminSignature.signatureStyle === 'script'
+                            ? 'font-display italic text-2xl font-bold'
+                            : adminSignature.signatureStyle === 'stamp'
+                            ? 'font-mono-tabular uppercase tracking-widest text-base font-extrabold border-2 border-[#3B0944] px-2.5 py-0.5 inline-block rounded'
+                            : 'font-display text-xl font-bold'
+                        }`}
+                      >
+                        {adminSignature.signerName}
+                      </div>
+                      <div className="text-xs font-semibold text-gray-800">
+                        {adminSignature.signerTitle} ·{' '}
+                        <span className="font-mono-tabular">{adminSignature.signerEmail}</span>
+                      </div>
+                      <div className="text-[11px] opacity-75">
+                        {adminSignature.verificationNote}
+                      </div>
+                    </div>
+
+                    <div className="no-print flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSheetSecSpecialist(
+                            `${adminSignature.signerName} (${adminSignature.signerEmail})`
+                          );
+                          showNotification(
+                            `Stamped "${adminSignature.signerName}" as Attending Specialist.`
+                          );
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-[#3B0944] text-[#3B0944] hover:bg-purple-100 text-xs font-bold transition whitespace-nowrap"
+                      >
+                        Stamp Specialist Field
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingAdminSig(true);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="px-3 py-1.5 rounded-lg plum-btn text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <PenTool className="w-3.5 h-3.5 text-[#D4AF37]" />
+                        <span>Change Admin Signature</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Action Bar: Save Record, Print/PDF, Delete Client, Export JSON, Email Dispatch, WhatsApp */}
                   <div className="no-print flex flex-wrap items-center justify-between gap-3 pt-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -4488,13 +5787,13 @@ export default function App() {
                             clientName: sheetClientName,
                             clientEmail: sheetClientEmail || 'client@example.com',
                             subject: `Sidratu Beauty Therapy — Clinic Record & Appointment Confirmation`,
-                            body: `Dear ${sheetClientName},\n\nThis is an official message from Sidratu Beauty Therapy Skin Care at 101 Jomo Kenyatta Road, Freetown.\n\nVisit Timestamp: ${sheetVisitDateTime}\nRecorded Notes: ${sheetSecNotes || 'Your appointment and clinical record sheet are up to date.'}\n\nWarm regards,\nSidratu Sesay\nSidratu Beauty Therapy Skin Care\nAdmin Email: ${PRIMARY_ADMIN_EMAIL}`
+                            body: `Dear ${sheetClientName},\n\nThis is an official message from Sidratu Beauty Therapy Skin Care at 101 Jomo Kenyatta Road, Freetown.\n\nVisit Timestamp: ${sheetVisitDateTime}\nRecorded Notes: ${sheetSecNotes || 'Your appointment and clinical record sheet are up to date.'}\n\nWarm regards,\n${adminSignature.signerName}\n${adminSignature.signerTitle}\nSidratu Beauty Therapy Skin Care\nAdmin Email: ${adminSignature.signerEmail}`
                           })
                         }
                         className="px-4 py-2.5 rounded-xl plum-btn text-sm font-bold flex items-center gap-2 shadow whitespace-nowrap"
                       >
                         <Mail className="w-4 h-4 text-[#D4AF37]" />
-                        <span>Email from {PRIMARY_ADMIN_EMAIL}</span>
+                        <span>Email from {adminSignature.signerEmail}</span>
                       </button>
 
                       <button
@@ -5022,7 +6321,52 @@ export default function App() {
                 </button>
               </form>
 
-              {/* 3. OWNER-ONLY ADMIN SETTINGS (Manage Staff Emails/Phones) */}
+              {/* 3. OWNER-ONLY ADMIN SETTINGS (Manage Staff Emails/Phones & Official Signature) */}
+              {currentUser.role !== 'Customer' && (
+                <div className="space-y-3 pt-4 border-t border-[#E6DEC8]">
+                  <h4 className="text-xs font-bold tracking-wider text-[#D4AF37] flex items-center gap-1.5">
+                    <PenTool className="w-3.5 h-3.5" />
+                    <span>Official Admin Signature &amp; Sign-Off</span>
+                  </h4>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Admin Signer Name</label>
+                    <input
+                      type="text"
+                      value={sigDraftName}
+                      onChange={e => setSigDraftName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 text-xs font-semibold"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Official Title</label>
+                      <input
+                        type="text"
+                        value={sigDraftTitle}
+                        onChange={e => setSigDraftTitle(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Signature Email</label>
+                      <input
+                        type="email"
+                        value={sigDraftEmail}
+                        onChange={e => setSigDraftEmail(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 text-xs font-mono-tabular"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => saveAdminSignatureChanges()}
+                    className="w-full py-2 rounded-lg gold-btn text-xs font-bold whitespace-nowrap"
+                  >
+                    Save Admin Signature
+                  </button>
+                </div>
+              )}
+
               {currentUser.role === 'Owner' && (
                 <div className="space-y-3 pt-4 border-t border-[#E6DEC8]">
                   <h4 className="text-xs font-bold tracking-wider text-[#D4AF37]">
@@ -5071,6 +6415,57 @@ export default function App() {
                   >
                     Update Authorized Staff List
                   </button>
+                </div>
+              )}
+
+              {/* 3B. STAFF / ADMIN ROLE UNLOCK FOR CUSTOMERS WITH ADMIN PASSWORD */}
+              {currentUser.role === 'Customer' && (
+                <div className="space-y-2.5 pt-4 border-t border-[#E6DEC8]">
+                  {!showDrawerAdminUnlock ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowDrawerAdminUnlock(true)}
+                      className="text-xs font-semibold text-[#3B0944] dark:text-[#F3E5AB] underline underline-offset-2 flex items-center gap-1.5 opacity-80 hover:opacity-100"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <span>Staff / Admin Unlock (Requires Password)</span>
+                    </button>
+                  ) : (
+                    <form
+                      onSubmit={handleUnlockAdminInDrawer}
+                      className="p-3 rounded-xl border border-[#D4AF37] bg-amber-50/40 dark:bg-white/5 space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                          <span>Enter Admin Password / Code</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowDrawerAdminUnlock(false);
+                            setDrawerAdminPassword('');
+                          }}
+                          className="text-[11px] underline opacity-75"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        value={drawerAdminPassword}
+                        onChange={e => setDrawerAdminPassword(e.target.value)}
+                        placeholder="Enter Admin password"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 text-xs"
+                      />
+                      <button
+                        type="submit"
+                        className="w-full py-2 rounded-lg plum-btn text-xs font-bold"
+                      >
+                        Verify &amp; Unlock Admin Mode
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
 

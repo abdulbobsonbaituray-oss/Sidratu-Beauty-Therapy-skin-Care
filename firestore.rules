@@ -1,0 +1,455 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 1. GLOBAL SAFETY NET (Default-Deny Catch-All)
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 2. PRIMITIVE HELPERS & RBAC IDENTITY GATES
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Bootstrapped Admin emails (Runtime user email & clinic primary admin email, strictly requiring email_verified == true)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'abdulbobsonbaituray@gmail.com' ||
+        request.auth.token.email == 'Sidratu82sesay@gmail.com' ||
+        request.auth.token.email == 'sidratu82sesay@gmail.com'
+      );
+    }
+
+    // Full Admin check: Bootstrapped Admin OR verified user present in /admins/{uid}
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // =========================================================================
+    // 3. SCHEMA VALIDATION BLUEPRINTS (Anti-Update-Gap)
+    // =========================================================================
+    function isValidClientProfile(data) {
+      return data.keys().hasAll([
+          'ownerUid',
+          'name',
+          'phone',
+          'email',
+          'address',
+          'allergies',
+          'dob',
+          'quickNotes',
+          'role',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid',
+          'name',
+          'phone',
+          'email',
+          'address',
+          'allergies',
+          'dob',
+          'quickNotes',
+          'role',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 0 && data.phone.size() <= 40 &&
+        data.email is string && data.email.size() >= 0 && data.email.size() <= 150 &&
+        data.address is string && data.address.size() >= 0 && data.address.size() <= 250 &&
+        data.allergies is string && data.allergies.size() >= 0 && data.allergies.size() <= 500 &&
+        data.dob is string && data.dob.size() >= 0 && data.dob.size() <= 20 &&
+        data.quickNotes is string && data.quickNotes.size() >= 0 && data.quickNotes.size() <= 2000 &&
+        data.role is string && data.role in ['Customer', 'Owner', 'Secretary', 'Security'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAppointmentRecord(data) {
+      return data.keys().hasAll([
+          'clientId',
+          'ownerUid',
+          'clientName',
+          'treatment',
+          'date',
+          'time',
+          'notes',
+          'consentSignedBy',
+          'status',
+          'frequency',
+          'adminResponse',
+          'adminRespondedBy',
+          'adminRespondedAt',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'clientId',
+          'ownerUid',
+          'clientName',
+          'treatment',
+          'date',
+          'time',
+          'notes',
+          'consentSignedBy',
+          'status',
+          'frequency',
+          'adminResponse',
+          'adminRespondedBy',
+          'adminRespondedAt',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidId(data.clientId) &&
+        isValidId(data.ownerUid) &&
+        data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 120 &&
+        data.treatment is string && data.treatment.size() >= 1 && data.treatment.size() <= 200 &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 30 &&
+        data.time is string && data.time.size() >= 1 && data.time.size() <= 30 &&
+        data.notes is string && data.notes.size() >= 0 && data.notes.size() <= 1000 &&
+        data.consentSignedBy is string && data.consentSignedBy.size() >= 1 && data.consentSignedBy.size() <= 120 &&
+        data.status is string && data.status in ['Confirmed', 'Responded', 'Completed'] &&
+        data.frequency is string && data.frequency in ['None', 'Weekly', 'Monthly'] &&
+        data.adminResponse is string && data.adminResponse.size() >= 0 && data.adminResponse.size() <= 2000 &&
+        data.adminRespondedBy is string && data.adminRespondedBy.size() >= 0 && data.adminRespondedBy.size() <= 150 &&
+        data.adminRespondedAt is string && data.adminRespondedAt.size() >= 0 && data.adminRespondedAt.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTreatmentHistoryRecord(data) {
+      return data.keys().hasAll([
+          'clientId',
+          'ownerUid',
+          'clientName',
+          'dayDateTime',
+          'treatment',
+          'ratingOrPayment',
+          'specialist',
+          'notes',
+          'specialistNotes',
+          'adminResponse',
+          'adminRespondedBy',
+          'adminRespondedAt',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'clientId',
+          'ownerUid',
+          'clientName',
+          'dayDateTime',
+          'treatment',
+          'ratingOrPayment',
+          'specialist',
+          'notes',
+          'specialistNotes',
+          'adminResponse',
+          'adminRespondedBy',
+          'adminRespondedAt',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidId(data.clientId) &&
+        isValidId(data.ownerUid) &&
+        data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 120 &&
+        data.dayDateTime is string && data.dayDateTime.size() >= 1 && data.dayDateTime.size() <= 100 &&
+        data.treatment is string && data.treatment.size() >= 1 && data.treatment.size() <= 200 &&
+        data.ratingOrPayment is string && data.ratingOrPayment.size() >= 1 && data.ratingOrPayment.size() <= 150 &&
+        data.specialist is string && data.specialist.size() >= 1 && data.specialist.size() <= 120 &&
+        data.notes is string && data.notes.size() >= 0 && data.notes.size() <= 2000 &&
+        data.specialistNotes is string && data.specialistNotes.size() >= 0 && data.specialistNotes.size() <= 2000 &&
+        data.adminResponse is string && data.adminResponse.size() >= 0 && data.adminResponse.size() <= 2000 &&
+        data.adminRespondedBy is string && data.adminRespondedBy.size() >= 0 && data.adminRespondedBy.size() <= 150 &&
+        data.adminRespondedAt is string && data.adminRespondedAt.size() >= 0 && data.adminRespondedAt.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRoleRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.role is string && data.role in ['Owner', 'Secretary', 'Security'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // 4. COLLECTION RULES
+    // =========================================================================
+
+    // /clients/{clientId} — Client Profile & Clinical Record Sheet
+    match /clients/{clientId} {
+      allow get: if isSignedIn() && isValidId(clientId) && (
+        existing().ownerUid == request.auth.uid || isAdmin()
+      );
+
+      // No get()/exists() inside allow list (Pillar 8 Cost-Optimization Clause)
+      allow list: if isSignedIn() && (
+        existing().ownerUid == request.auth.uid || isBootstrappedAdmin()
+      );
+
+      allow create: if isVerifiedUser() &&
+        isValidId(clientId) &&
+        isValidClientProfile(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (incoming().ownerUid == request.auth.uid && incoming().role == 'Customer' && incoming().quickNotes == '') ||
+          isAdmin()
+        );
+
+      allow update: if isValidClientProfile(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(clientId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Client updates own personal & clinical profile (cannot alter role or quickNotes)
+          (
+            existing().ownerUid == request.auth.uid &&
+            incoming().role == existing().role &&
+            incoming().quickNotes == existing().quickNotes &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name',
+              'phone',
+              'email',
+              'address',
+              'allergies',
+              'dob',
+              'updatedAt'
+            ])
+          ) ||
+          // Action 2: Administrator updates client record sheet
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name',
+              'phone',
+              'email',
+              'address',
+              'allergies',
+              'dob',
+              'quickNotes',
+              'role',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(clientId) && isAdmin();
+    }
+
+    // /appointments/{appointmentId} — Client Scheduled Appointments
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && isValidId(appointmentId) && (
+        existing().ownerUid == request.auth.uid || isAdmin()
+      );
+
+      allow list: if isSignedIn() && (
+        existing().ownerUid == request.auth.uid || isBootstrappedAdmin()
+      );
+
+      allow create: if isVerifiedUser() &&
+        isValidId(appointmentId) &&
+        isValidAppointmentRecord(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId)) &&
+        (
+          (
+            incoming().ownerUid == request.auth.uid &&
+            incoming().status == 'Confirmed' &&
+            incoming().adminResponse == '' &&
+            incoming().adminRespondedBy == '' &&
+            incoming().adminRespondedAt == '' &&
+            get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerUid == request.auth.uid
+          ) ||
+          isAdmin()
+        );
+
+      allow update: if isValidAppointmentRecord(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(appointmentId) &&
+        incoming().clientId == existing().clientId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().status != 'Completed' || isAdmin()) &&
+        (
+          // Action 1: Client updates appointment date, time, notes, or frequency prior to completion
+          (
+            existing().ownerUid == request.auth.uid &&
+            existing().status != 'Completed' &&
+            incoming().status == existing().status &&
+            incoming().adminResponse == existing().adminResponse &&
+            incoming().adminRespondedBy == existing().adminRespondedBy &&
+            incoming().adminRespondedAt == existing().adminRespondedAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'date',
+              'time',
+              'notes',
+              'frequency',
+              'updatedAt'
+            ])
+          ) ||
+          // Action 2: Administrator responds to or updates appointment status
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'clientName',
+              'treatment',
+              'date',
+              'time',
+              'notes',
+              'status',
+              'frequency',
+              'adminResponse',
+              'adminRespondedBy',
+              'adminRespondedAt',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(appointmentId) && (
+        (existing().ownerUid == request.auth.uid && existing().status != 'Completed') ||
+        isAdmin()
+      );
+    }
+
+    // /treatmentHistory/{historyId} — Client Past Treatment History & Clinical Logs
+    match /treatmentHistory/{historyId} {
+      allow get: if isSignedIn() && isValidId(historyId) && (
+        existing().ownerUid == request.auth.uid || isAdmin()
+      );
+
+      allow list: if isSignedIn() && (
+        existing().ownerUid == request.auth.uid || isBootstrappedAdmin()
+      );
+
+      allow create: if isVerifiedUser() &&
+        isValidId(historyId) &&
+        isValidTreatmentHistoryRecord(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId)) &&
+        (
+          (
+            incoming().ownerUid == request.auth.uid &&
+            incoming().specialistNotes == '' &&
+            incoming().adminResponse == '' &&
+            incoming().adminRespondedBy == '' &&
+            incoming().adminRespondedAt == '' &&
+            get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerUid == request.auth.uid
+          ) ||
+          isAdmin()
+        );
+
+      allow update: if isValidTreatmentHistoryRecord(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(historyId) &&
+        incoming().clientId == existing().clientId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Client updates their own post-session feeling / notes
+          (
+            existing().ownerUid == request.auth.uid &&
+            incoming().specialistNotes == existing().specialistNotes &&
+            incoming().adminResponse == existing().adminResponse &&
+            incoming().adminRespondedBy == existing().adminRespondedBy &&
+            incoming().adminRespondedAt == existing().adminRespondedAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'ratingOrPayment',
+              'notes',
+              'updatedAt'
+            ])
+          ) ||
+          // Action 2: Administrator records specialist notes or responds to treatment history
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'clientName',
+              'dayDateTime',
+              'treatment',
+              'ratingOrPayment',
+              'specialist',
+              'notes',
+              'specialistNotes',
+              'adminResponse',
+              'adminRespondedBy',
+              'adminRespondedAt',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(historyId) && isAdmin();
+    }
+
+    // /admins/{adminUid} — Trusted Administrator Role Registry
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && (
+        request.auth.uid == adminUid || isAdmin()
+      );
+
+      allow list: if isBootstrappedAdmin();
+
+      allow create: if isVerifiedUser() &&
+        isValidId(adminUid) &&
+        isValidAdminRoleRecord(incoming()) &&
+        incoming().uid == adminUid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isBootstrappedAdmin();
+
+      allow update: if isValidAdminRoleRecord(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(adminUid) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isBootstrappedAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'email',
+          'role',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser() && isValidId(adminUid) && isBootstrappedAdmin();
+    }
+  }
+}
